@@ -1,0 +1,253 @@
+@import "tailwindcss";
+
+/* ---------- Theme tokens ---------- */
+@theme {
+  /* Brand — Brawl Stars-inspired electric yellow + magenta on deep navy */
+  --color-brand-yellow: #ffc015;
+  --color-brand-yellow-soft: #ffd84a;
+  --color-brand-magenta: #ff2d87;
+  --color-brand-cyan: #28d2ff;
+  --color-brand-violet: #8a5cff;
+
+  /* Surface palette (dark gaming) */
+  --color-bg-base: #0a0d1b;
+  --color-bg-surface: #131836;
+  --color-bg-surface-2: #1c2147;
+  --color-bg-elevated: #232a5c;
+  --color-bg-overlay: rgba(8, 10, 22, 0.78);
+
+  /* Text */
+  --color-text-base: #f3f5ff;
+  --color-text-muted: #8b91c2;
+  --color-text-dim: #565b87;
+
+  /* Semantic */
+  --color-success: #2bd672;
+  --color-danger: #ff4d6d;
+  --color-warning: #ffb020;
+  --color-info: #28d2ff;
+
+  /* Borders */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Radii */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* Fonts */
+  --font-sans:
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Lilita One", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ---------- Base layer ---------- */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background-color: var(--color-bg-base);
+    color: var(--color-text-base);
+    overflow-x: hidden;
+  }
+
+  /* Aurora background — fixed gradient blobs anchored behind everything. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -10vmax;
+    z-index: -2;
+    background:
+      radial-gradient(
+        50vmax 50vmax at 18% 12%,
+        rgba(255, 192, 21, 0.22),
+        transparent 65%
+      ),
+      radial-gradient(
+        45vmax 45vmax at 86% 18%,
+        rgba(255, 45, 135, 0.20),
+        transparent 65%
+      ),
+      radial-gradient(
+        55vmax 55vmax at 50% 92%,
+        rgba(138, 92, 255, 0.22),
+        transparent 65%
+      ),
+      var(--color-bg-base);
+    filter: saturate(1.05);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background-image:
+      linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.025) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.025) 1px,
+        transparent 1px
+      );
+    background-size: 56px 56px;
+    mask-image: radial-gradient(circle at center, #000 30%, transparent 75%);
+    pointer-events: none;
+  }
+
+  ::selection {
+    background: var(--color-brand-yellow);
+    color: #1a1300;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  input,
+  button,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+/* ---------- Reusable component classes ---------- */
+@layer components {
+  .surface {
+    background: linear-gradient(
+      155deg,
+      var(--color-bg-surface) 0%,
+      var(--color-bg-surface-2) 100%
+    );
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+  .surface-elevated {
+    background: linear-gradient(
+      155deg,
+      var(--color-bg-surface-2) 0%,
+      var(--color-bg-elevated) 100%
+    );
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+  }
+
+  .glow-yellow {
+    box-shadow:
+      0 0 0 1px rgba(255, 192, 21, 0.55),
+      0 12px 36px -6px rgba(255, 192, 21, 0.45);
+  }
+  .glow-magenta {
+    box-shadow:
+      0 0 0 1px rgba(255, 45, 135, 0.55),
+      0 12px 36px -6px rgba(255, 45, 135, 0.45);
+  }
+  .glow-cyan {
+    box-shadow:
+      0 0 0 1px rgba(40, 210, 255, 0.55),
+      0 12px 36px -6px rgba(40, 210, 255, 0.45);
+  }
+
+  .display {
+    font-family: var(--font-display);
+    letter-spacing: 0.01em;
+  }
+
+  .text-gradient-y {
+    background: linear-gradient(
+      90deg,
+      var(--color-brand-yellow) 0%,
+      var(--color-brand-yellow-soft) 50%,
+      #fff5b8 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-m {
+    background: linear-gradient(
+      90deg,
+      var(--color-brand-magenta),
+      var(--color-brand-violet)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .pulse-dot {
+    position: relative;
+  }
+  .pulse-dot::before {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.4;
+    animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+/* ---------- Animations ---------- */
+@keyframes pulse-ring {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.10) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
