@@ -1,32 +1,27 @@
-import type { HTMLAttributes } from "react";
+import type { ReactNode } from "react";
 import { cn } from "../../utils/cn";
 
-interface Props extends HTMLAttributes<HTMLDivElement> {
-  elevated?: boolean;
-  padding?: "sm" | "md" | "lg";
-}
-
-const PADDING: Record<NonNullable<Props["padding"]>, string> = {
+const PAD = {
+  none: "",
   sm: "p-3",
-  md: "p-4 md:p-5",
-  lg: "p-5 md:p-7",
-};
+  md: "p-4",
+  lg: "p-5",
+} as const;
 
 export function Card({
-  elevated = false,
-  padding = "md",
-  className,
   children,
-  ...rest
-}: Props) {
+  className,
+  padding = "md",
+  hover = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  padding?: keyof typeof PAD;
+  hover?: boolean;
+}) {
   return (
     <div
-      className={cn(
-        elevated ? "surface-elevated" : "surface",
-        PADDING[padding],
-        className,
-      )}
-      {...rest}
+      className={cn("surface", PAD[padding], hover && "card-hover", className)}
     >
       {children}
     </div>

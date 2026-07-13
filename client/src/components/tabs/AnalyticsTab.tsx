@@ -1,41 +1,26 @@
-import {
-  Bar,
-  BarChart,
-  Cell,
-  Pie,
-  PieChart,
-  PolarAngleAxis,
-  PolarGrid,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useMemo } from "react";
 import type { PlayerProfileAnalytics } from "../../types/analytics";
 import { Card } from "../ui/Card";
-import { Badge } from "../ui/Badge";
-import { fmtMode, fmtPercent } from "../../utils/format";
+import { SectionTitle } from "../ui/SectionTitle";
+import { RadialGauge } from "../ui/RadialGauge";
+import { TrophyProgress } from "../player/TrophyProgress";
+import { Img } from "../ui/Img";
+import { cdn } from "../../utils/cdn";
+import { fmtNum, fmtMode, fmtPercent, fmtDuration, fmtPlaytime, fmtHours } from "../../utils/format";
+import { loadPlaytime } from "../../utils/battleStore";
+import { estimateLifetimeSeconds } from "../../utils/playtime";
+import { prettyBrawlerName } from "../../utils/brawlerName";
+import { buildInsights } from "../../utils/insights";
 import { useAccumulatedBattles } from "../../hooks/useAccumulatedBattles";
+import { accentHex } from "../ui/accent";
+import { IconFire, IconBulb, IconCheck, IconWarning, IconClock } from "../ui/icons";
 
-const COLORS = {
-  yellow: "#ffc015",
-  magenta: "#ff2d87",
-  cyan: "#28d2ff",
-  violet: "#8a5cff",
-  success: "#2bd672",
-  danger: "#ff4d6d",
-  warning: "#ffb020",
-};
-
-const tooltipStyle = {
-  background: "#131836",
-  border: "1px solid rgba(255,255,255,0.15)",
-  borderRadius: 12,
-  color: "#f3f5ff",
-  fontSize: 12,
-} as const;
+function winColor(win: number): string {
+  if (win >= 0.6) return accentHex.success;
+  if (win >= 0.5) return accentHex.cyan;
+  if (win >= 0.42) return accentHex.gold;
+  return accentHex.danger;
+}
 
 export function AnalyticsTab({
   profile,
@@ -44,370 +29,289 @@ export function AnalyticsTab({
   profile: PlayerProfileAnalytics;
   tag: string;
 }) {
-  const { summary } = profile;
-  const accumulated = useAccumulatedBattles(tag);
-  const battlelog =
-    accumulated.analytics &&
-    accumulated.analytics.totalBattles >= (profile.battlelog?.totalBattles ?? 0)
-      ? accumulated.analytics
-      : profile.battlelog;
-  const battleCountSuffix =
-    accumulated.analytics &&
-    accumulated.analytics.totalBattles > (profile.battlelog?.totalBattles ?? 0)
-      ? ` (${accumulated.freshCount} récents + ${accumulated.storedCount} archivés)`
-      : "";
+  const acc = useAccumulatedBattles(tag);
+  const analytics = acc.analytics ?? profile.battlelog;
+  const summary = profile.summary;
 
-  const rankData = Object.entries(summary.rankDistribution)
-    .sort(([a], [b]) => bucketSortKey(a) - bucketSortKey(b))
-    .map(([bucket, count]) => ({ bucket, count }));
+  const insights = useMemo(() => buildInsights(analytics), [analytics]);
+  const modes = (analytics?.modes ?? []).filter((m) => m.battles >= 2).slice(0, 6);
+  const hasData = analytics && analytics.countedBattles > 0;
 
-  const trophyData = Object.entries(summary.trophyDistribution)
-    .sort(([a], [b]) => trophyBucketSort(a) - trophyBucketSort(b))
-    .map(([bucket, count]) => ({ bucket, count }));
+  const brawlerPerf = useMemo(
+    () =>
+      (analytics?.brawlers ?? [])
+        .filter((b) => b.battles >= 2)
+        .sort((a, b) => b.battles - a.battles || b.winRate - a.winRate)
+        .slice(0, 8),
+    [analytics],
+  );
+  const maps = useMemo(() => {
+    const list = (analytics?.maps ?? []).filter(
+      (m) => m.battles >= 2 && m.map && m.map !== "unknown",
+    );
+    const best = [...list].sort((a, b) => b.winRate - a.winRate).slice(0, 3);
+    const worst = [...list]
+      .sort((a, b) => a.winRate - b.winRate)
+      .slice(0, 3)
+      .filter((m) => !best.includes(m));
+    return { best, worst };
+  }, [analytics]);
 
-  const completionRadar = [
-    { axis: "Star Powers", value: summary.completion.starPowers * 100 },
-    { axis: "Gadgets", value: summary.completion.gadgets * 100 },
-    { axis: "Gears", value: summary.completion.gears * 100 },
-  ];
-
-  const resultsData = battlelog
-    ? [
-        { name: "V", value: battlelog.results.victory, color: COLORS.success },
-        { name: "D", value: battlelog.results.defeat, color: COLORS.danger },
-        { name: "N", value: battlelog.results.draw, color: COLORS.warning },
-      ]
-    : [];
-
-  const modeData =
-    battlelog?.modes.slice(0, 6).map((m) => ({
-      mode: fmtMode(m.mode),
-      winRate: Math.round(m.winRate * 100),
-      battles: m.battles,
-    })) ?? [];
-
-  const brawlerData =
-    battlelog?.brawlers
-      .filter((b) => b.battles >= 1)
-      .slice(0, 6)
-      .map((b) => ({
-        name: b.name,
-        winRate: Math.round(b.winRate * 100),
-        battles: b.battles,
-      })) ?? [];
+  // Temps de jeu suivi : compteur cumulé persistant (grandit à chaque nouveau
+  // combat vu, survit à l'éviction des vieux matchs de l'archive).
+  const tracked = useMemo(() => loadPlaytime(tag), [tag, acc.items]);
+  // Estimation à vie (grossière) : parties × (durée en match + menus/matchmaking).
+  const estLifetimeSec = useMemo(
+    () =>
+      estimateLifetimeSeconds(
+        summary.totalVictories,
+        analytics?.winRate,
+        analytics?.averageDurationSeconds,
+      ),
+    [analytics, summary.totalVictories],
+  );
 
   return (
-    <div className="mt-4 grid grid-cols-12 gap-4">
-      {/* Headline analytics row */}
-      <Card className="col-span-12 md:col-span-4">
-        <h3 className="display text-lg mb-1">Win rate</h3>
-        <div className="display text-5xl text-gradient-y">
-          {battlelog ? fmtPercent(battlelog.winRate, 1) : "—"}
-        </div>
-        <div className="text-text-dim text-xs mt-1">
-          {battlelog
-            ? `sur ${battlelog.countedBattles} matchs${battleCountSuffix}`
-            : "—"}
-        </div>
-      </Card>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-12">
+      {/* Progression des trophées (ex-onglet Historique, fusionné ici) */}
+      <TrophyProgress profile={profile} tag={tag} />
 
-      <Card className="col-span-12 md:col-span-4">
-        <h3 className="display text-lg mb-1">Plus longue série</h3>
-        <div className="display text-5xl text-gradient-m">
-          {battlelog?.longestWinStreak ?? 0}V
-        </div>
-        <div className="text-text-dim text-xs mt-1">
-          en cours :{" "}
-          <span className="text-text-base font-semibold">
-            {battlelog?.currentStreak.type
-              ? `${battlelog.currentStreak.length} ${battlelog.currentStreak.type[0]!.toUpperCase()}`
-              : "—"}
-          </span>
-        </div>
-      </Card>
-
-      <Card className="col-span-12 md:col-span-4">
-        <h3 className="display text-lg mb-1">Star Player</h3>
-        <div className="display text-5xl text-brand-cyan">
-          {battlelog ? fmtPercent(battlelog.starPlayerRate, 0) : "—"}
-        </div>
-        <div className="text-text-dim text-xs mt-1">
-          {battlelog?.starPlayerAppearances ?? 0} apparitions
-        </div>
-      </Card>
-
-      {/* Results pie + mode bars */}
-      <Card className="col-span-12 md:col-span-5">
-        <h3 className="display text-lg mb-3">Résultats récents</h3>
-        {resultsData.reduce((s, r) => s + r.value, 0) === 0 ? (
-          <p className="text-text-muted text-sm">Aucune donnée.</p>
-        ) : (
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={resultsData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={50}
-                  outerRadius={85}
-                  paddingAngle={4}
-                  stroke="none"
-                >
-                  {resultsData.map((d) => (
-                    <Cell key={d.name} fill={d.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(v, n) => [`${Number(v)} match(s)`, n]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-        <div className="flex justify-around mt-2 text-sm">
-          {resultsData.map((r) => (
-            <div key={r.name} className="text-center">
-              <div
-                className="display text-2xl"
-                style={{ color: r.color }}
-              >
-                {r.value}
-              </div>
-              <div className="text-text-dim text-xs">{r.name}</div>
+      {hasData ? (
+        <>
+          {/* Win rate + chiffres clés */}
+          <Card padding="lg" className="col-span-2 flex items-center justify-center lg:col-span-4">
+            <RadialGauge
+              value={analytics.winRate}
+              center={fmtPercent(analytics.winRate, 0)}
+              label="Win rate"
+              accent="success"
+              size={128}
+            />
+          </Card>
+          <Card padding="lg" className="col-span-2 lg:col-span-8">
+            <SectionTitle>Sur {analytics.countedBattles} combats analysés</SectionTitle>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <KeyStat value={<span className="inline-flex items-center gap-0.5"><IconFire size={16} />{analytics.longestWinStreak}</span>} label="Plus longue série" accent="text-magenta" />
+              <KeyStat value={fmtPercent(analytics.starPlayerRate, 0)} label="Star Player" accent="text-gold" />
+              <KeyStat
+                value={`${analytics.totalTrophyChange >= 0 ? "+" : ""}${fmtNum(analytics.totalTrophyChange)}`}
+                label="Δ trophées"
+                accent={analytics.totalTrophyChange >= 0 ? "text-success" : "text-danger"}
+              />
+              <KeyStat
+                value={`${analytics.averageTrophyChange >= 0 ? "+" : ""}${analytics.averageTrophyChange.toFixed(1)}`}
+                label="Δ moyen / combat"
+                accent={analytics.averageTrophyChange >= 0 ? "text-success" : "text-danger"}
+              />
+              <KeyStat
+                value={fmtDuration(analytics.averageDurationSeconds)}
+                label="Durée moyenne"
+                accent="text-cyan"
+              />
+              <KeyStat
+                value={`${analytics.results.victory}/${analytics.results.draw}/${analytics.results.defeat}`}
+                label="V / N / D"
+                accent="text-text"
+              />
             </div>
-          ))}
-        </div>
-      </Card>
+          </Card>
 
-      <Card className="col-span-12 md:col-span-7">
-        <h3 className="display text-lg mb-3">Win rate par mode</h3>
-        {modeData.length === 0 ? (
-          <p className="text-text-muted text-sm">Aucune donnée.</p>
-        ) : (
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={modeData}
-                layout="vertical"
-                margin={{ left: 0, right: 24 }}
-              >
-                <XAxis
-                  type="number"
-                  domain={[0, 100]}
-                  tick={{ fill: "#8b91c2", fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="mode"
-                  width={110}
-                  tick={{ fill: "#f3f5ff", fontSize: 12, fontWeight: 600 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                  formatter={(v, _n, p) => [
-                    `${Number(v)}% (${(p as { payload: { battles: number } }).payload.battles} matchs)`,
-                    "Win rate",
-                  ]}
-                />
-                <Bar dataKey="winRate" radius={[0, 6, 6, 0]}>
-                  {modeData.map((d, i) => (
-                    <Cell
-                      key={i}
-                      fill={
-                        d.winRate >= 70
-                          ? COLORS.success
-                          : d.winRate >= 50
-                            ? COLORS.yellow
-                            : COLORS.danger
-                      }
+          {/* Perf par brawler */}
+          {brawlerPerf.length > 0 && (
+            <Card padding="lg" className="col-span-2 lg:col-span-7">
+              <SectionTitle>Tes brawlers en combat</SectionTitle>
+              <div className="space-y-1.5">
+                {brawlerPerf.map((b) => (
+                  <div key={b.id} className="flex items-center gap-3 rounded-xl bg-white/3 px-2.5 py-2">
+                    <Img
+                      src={cdn.brawlerBorderless(b.id)}
+                      alt={b.name}
+                      wrapperClassName="h-8 w-8 shrink-0"
+                      fallback={<span className="display text-[9px] text-gold">{b.name.slice(0, 2)}</span>}
                     />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </Card>
-
-      {/* Distributions */}
-      <Card className="col-span-12 lg:col-span-6">
-        <h3 className="display text-lg mb-3">Distribution des rangs</h3>
-        <div className="h-56">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rankData} margin={{ top: 8, left: -16 }}>
-              <XAxis
-                dataKey="bucket"
-                tick={{ fill: "#8b91c2", fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                tick={{ fill: "#8b91c2", fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                formatter={(v) => [`${Number(v)} brawlers`, "Quantité"]}
-              />
-              <Bar dataKey="count" radius={[6, 6, 0, 0]} fill={COLORS.magenta} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-
-      <Card className="col-span-12 lg:col-span-6">
-        <h3 className="display text-lg mb-3">Distribution des trophées</h3>
-        <div className="h-56">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trophyData} margin={{ top: 8, left: -16 }}>
-              <XAxis
-                dataKey="bucket"
-                tick={{ fill: "#8b91c2", fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                tick={{ fill: "#8b91c2", fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                formatter={(v) => [`${Number(v)} brawlers`, "Quantité"]}
-              />
-              <Bar dataKey="count" radius={[6, 6, 0, 0]} fill={COLORS.yellow} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-
-      {/* Per-brawler battle stats */}
-      {brawlerData.length > 0 && (
-        <Card className="col-span-12 lg:col-span-7">
-          <h3 className="display text-lg mb-3">Brawlers récemment joués</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={brawlerData}
-                margin={{ left: 0, right: 24 }}
-                layout="vertical"
-              >
-                <XAxis
-                  type="number"
-                  domain={[0, 100]}
-                  tick={{ fill: "#8b91c2", fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={90}
-                  tick={{ fill: "#f3f5ff", fontSize: 12, fontWeight: 600 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                  formatter={(v, _n, p) => [
-                    `${Number(v)}% (${(p as { payload: { battles: number } }).payload.battles} matchs)`,
-                    "Win rate",
-                  ]}
-                />
-                <Bar dataKey="winRate" fill={COLORS.cyan} radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      )}
-
-      {/* Kit radar */}
-      <Card className="col-span-12 lg:col-span-5">
-        <h3 className="display text-lg mb-3">Complétion du kit</h3>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <RadarChart data={completionRadar}>
-              <PolarGrid stroke="rgba(255,255,255,0.08)" />
-              <PolarAngleAxis
-                dataKey="axis"
-                tick={{ fill: "#8b91c2", fontSize: 12 }}
-              />
-              <Radar
-                dataKey="value"
-                stroke={COLORS.yellow}
-                fill={COLORS.yellow}
-                fillOpacity={0.35}
-              />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                formatter={(v) => [`${Number(v).toFixed(0)}%`, "Complétion"]}
-              />
-            </RadarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-
-      {/* Top maps */}
-      {battlelog && battlelog.maps.length > 0 && (
-        <Card className="col-span-12">
-          <h3 className="display text-lg mb-3">Top maps récentes</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {battlelog.maps.slice(0, 6).map((m) => (
-              <div
-                key={`${m.mode}-${m.map}`}
-                className="surface rounded-xl p-3 flex items-center justify-between gap-3"
-              >
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm truncate">{m.map}</div>
-                  <div className="text-text-dim text-xs">{fmtMode(m.mode)}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="display text-xl text-brand-yellow">
-                    {fmtPercent(m.winRate, 0)}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12.5px] font-bold text-text">{prettyBrawlerName(b.name)}</div>
+                      <div className="text-[10px] text-dim">{b.battles} matchs · {b.wins}V {b.losses}D</div>
+                    </div>
+                    <div
+                      className="font-mono text-[11px]"
+                      style={{ color: b.trophyChange >= 0 ? accentHex.success : accentHex.danger }}
+                    >
+                      {b.trophyChange >= 0 ? "+" : ""}{b.trophyChange}
+                    </div>
+                    <div className="w-11 text-right text-[13px] font-extrabold" style={{ color: winColor(b.winRate) }}>
+                      {fmtPercent(b.winRate, 0)}
+                    </div>
                   </div>
-                  <Badge tone="neutral">{m.battles} m.</Badge>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </Card>
+            </Card>
+          )}
+
+          {/* Meilleures / pires maps */}
+          {(maps.best.length > 0 || maps.worst.length > 0) && (
+            <Card padding="lg" className="col-span-2 lg:col-span-5">
+              <SectionTitle>Maps</SectionTitle>
+              <MapList title={<span className="inline-flex items-center gap-1 text-success"><IconCheck size={12} /> Meilleures</span>} items={maps.best} />
+              {maps.worst.length > 0 && (
+                <div className="mt-3">
+                  <MapList title={<span className="inline-flex items-center gap-1 text-danger"><IconWarning size={12} /> Pires</span>} items={maps.worst} />
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Winrate par mode */}
+          {modes.length > 0 && (
+            <Card padding="lg" className="col-span-2 lg:col-span-7">
+              <SectionTitle>Winrate par mode</SectionTitle>
+              <div className="space-y-3">
+                {modes.map((m) => {
+                  const c = winColor(m.winRate);
+                  return (
+                    <div key={m.mode}>
+                      <div className="mb-1 flex items-center justify-between text-[12px] font-semibold text-text-2">
+                        <span>{fmtMode(m.mode)} <span className="text-dim">· {m.battles}</span></span>
+                        <span style={{ color: c }}>{fmtPercent(m.winRate, 0)}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-white/7">
+                        <div className="h-full rounded-full" style={{ width: `${Math.round(m.winRate * 100)}%`, background: c }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* Insights */}
+          {insights.length > 0 && (
+            <div className="col-span-2 rounded-2xl border border-cyan/22 bg-gradient-to-br from-cyan/10 to-violet/5 p-4 lg:col-span-5">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-cyan"><IconBulb size={16} /></span>
+                <span className="text-[12px] font-bold tracking-wide text-cyan">Insights auto</span>
+              </div>
+              <div className="space-y-2.5">
+                {insights.map((t, i) => (
+                  <div key={i} className="flex gap-2 text-[13px] leading-relaxed text-text">
+                    <span className="text-cyan">›</span>
+                    <span>{t}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="col-span-2 px-6 py-10 text-center text-sm text-text-2 lg:col-span-12">
+          Pas encore assez de combats analysés. Joue quelques parties puis reviens — l'historique s'accumule à chaque visite.
+        </div>
       )}
 
-      {/* Computation timestamp */}
-      <div className="col-span-12 text-center text-text-dim text-xs flex items-center justify-center gap-2 pt-2">
-        <span className="pulse-dot text-brand-yellow w-1.5 h-1.5 rounded-full bg-brand-yellow inline-block" />
-        Calculé à l'instant via le proxy
+      {/* Temps de jeu */}
+      <Card padding="lg" className="col-span-2 lg:col-span-12">
+        <SectionTitle>Temps de jeu</SectionTitle>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-cyan/20 bg-cyan/5 p-4">
+            <div className="mb-1 inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-cyan">
+              <IconClock size={13} /> Temps suivi (en match)
+            </div>
+            <div className="display text-2xl text-cyan">{fmtPlaytime(tracked.sec)}</div>
+            <div className="mt-1 text-[11px] leading-relaxed text-dim">
+              {tracked.n > 0
+                ? `Somme exacte des durées de ${tracked.n} combats enregistrés depuis que tu suis ce profil — grandit à chaque visite.`
+                : "Se remplira au fil de tes visites (durées réelles des combats)."}
+            </div>
+          </div>
+          <div className="rounded-xl border border-gold/20 bg-gold/5 p-4">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gold">Estimation à vie</span>
+              <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold text-text-2">~ grossière</span>
+            </div>
+            <div className="display text-2xl text-gold">≈ {fmtHours(estLifetimeSec)}</div>
+            <div className="mt-1 text-[11px] leading-relaxed text-dim">
+              {fmtNum(summary.totalVictories)} victoires ÷ winrate{" "}
+              {analytics ? fmtPercent(analytics.winRate, 0) : "≈ 50 %"} × (durée moyenne
+              en match + ~45 s de menus / matchmaking / rejouer par partie).
+              Ordre de grandeur — l'API ne fournit pas le vrai temps de jeu.
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Répartition de la collection (toujours) */}
+      <Card padding="lg" className="col-span-2 lg:col-span-12">
+        <SectionTitle>Ta collection · {fmtNum(summary.brawlers.owned)} brawlers</SectionTitle>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Distribution title="Par niveau de power" dist={summary.powerDistribution} accent={accentHex.gold} />
+          <Distribution title="Par trophées" dist={summary.trophyDistribution} accent={accentHex.cyan} />
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function KeyStat({ value, label, accent }: { value: React.ReactNode; label: string; accent: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-white/3 px-3 py-2.5 text-center">
+      <div className={`display text-xl ${accent}`}>{value}</div>
+      <div className="mt-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-muted">{label}</div>
+    </div>
+  );
+}
+
+function MapList({
+  title,
+  items,
+}: {
+  title: React.ReactNode;
+  items: { map: string; mode: string; battles: number; winRate: number }[];
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted">{title}</div>
+      <div className="space-y-1.5">
+        {items.map((m) => (
+          <div key={`${m.mode}-${m.map}`} className="flex items-center gap-2 rounded-lg bg-white/3 px-2.5 py-1.5">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] font-semibold text-text">{m.map}</div>
+              <div className="text-[10px] text-dim">{fmtMode(m.mode)} · {m.battles}</div>
+            </div>
+            <span className="text-[13px] font-extrabold" style={{ color: winColor(m.winRate) }}>
+              {fmtPercent(m.winRate, 0)}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function bucketSortKey(b: string): number {
-  if (b === "1-9") return 0;
-  if (b === "10-14") return 1;
-  if (b === "15-19") return 2;
-  if (b === "20-24") return 3;
-  if (b === "25-29") return 4;
-  if (b === "30+") return 5;
-  return 99;
-}
-function trophyBucketSort(b: string): number {
-  if (b === "0") return 0;
-  if (b === "1-299") return 1;
-  if (b === "300-499") return 2;
-  if (b === "500-699") return 3;
-  if (b === "700-999") return 4;
-  if (b === "1000+") return 5;
-  return 99;
+function Distribution({
+  title,
+  dist,
+  accent,
+}: {
+  title: string;
+  dist: Record<string, number>;
+  accent: string;
+}) {
+  const entries = Object.entries(dist).filter(([, v]) => v > 0);
+  const max = Math.max(1, ...entries.map(([, v]) => v));
+  return (
+    <div>
+      <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted">{title}</div>
+      <div className="space-y-1.5">
+        {entries.map(([label, v]) => (
+          <div key={label} className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-right font-mono text-[11px] text-text-2">{label}</span>
+            <div className="h-3 flex-1 overflow-hidden rounded bg-white/6">
+              <div className="h-full rounded" style={{ width: `${(v / max) * 100}%`, background: accent }} />
+            </div>
+            <span className="w-6 text-right text-[11px] font-bold text-text">{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

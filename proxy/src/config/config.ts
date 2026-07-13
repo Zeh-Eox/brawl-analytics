@@ -30,6 +30,30 @@ const EnvSchema = z.object({
 
   // Cache sizing
   CACHE_MAX_ITEMS: z.coerce.number().int().positive().default(2_000),
+
+  // ---- Background capture (tracker) ----
+  // Where the tracker persists per-tag battle archives & trophy timelines.
+  DATA_DIR: z.string().default("./data"),
+  // Master switch for the background poller.
+  TRACKER_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // How often the poller sweeps every active tag.
+  TRACKER_POLL_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10 * 60_000),
+  // Pause between two tags within a sweep (spreads upstream load / quota).
+  TRACKER_POLL_SPACING_MS: z.coerce.number().int().nonnegative().default(1_500),
+  // Max distinct tags kept under active polling (LRU by last request).
+  TRACKER_MAX_TAGS: z.coerce.number().int().positive().default(50),
+  // A tag not requested for this many days stops being polled.
+  TRACKER_INACTIVE_DAYS: z.coerce.number().int().positive().default(14),
+  // Per-tag caps.
+  TRACKER_BATTLE_CAP: z.coerce.number().int().positive().default(500),
+  TRACKER_TIMELINE_CAP: z.coerce.number().int().positive().default(2_000),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

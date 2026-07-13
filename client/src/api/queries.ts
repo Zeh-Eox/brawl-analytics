@@ -1,16 +1,26 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 import type {
   BattleLog,
+  Club,
+  ClubRankingList,
   Player,
+  PlayerRankingList,
   ScheduledEvent,
 } from "../types/brawlstars";
 import type {
   BrawlerEnriched,
+  ClubSummary,
+  PlayerComparison,
   PlayerProfileAnalytics,
   PlayerSummary,
   BattlelogAnalytics,
 } from "../types/analytics";
+import type {
+  TrackerBattles,
+  TrackerStatus,
+  TrackerTimeline,
+} from "../types/tracker";
 
 /** Standard query options for player-scoped resources. */
 const playerScoped = {
@@ -33,6 +43,15 @@ export const queryKeys = {
   battlelogAnalytics: (tag: string) =>
     ["analytics", "battlelog", tag] as const,
   events: () => ["events"] as const,
+  club: (tag: string) => ["club", tag] as const,
+  clubSummary: (tag: string) => ["club", "summary", tag] as const,
+  playerRankings: (country: string) =>
+    ["rankings", "players", country] as const,
+  clubRankings: (country: string) => ["rankings", "clubs", country] as const,
+  compare: (a: string, b: string) => ["compare", a, b] as const,
+  tracker: (tag: string) => ["tracker", tag] as const,
+  trackerTimeline: (tag: string) => ["tracker", "timeline", tag] as const,
+  trackerBattles: (tag: string) => ["tracker", "battles", tag] as const,
 };
 
 export function usePlayerProfile(tag: string | undefined) {
@@ -104,5 +123,106 @@ export function useEventRotation() {
     queryKey: queryKeys.events(),
     queryFn: () => apiFetch<ScheduledEvent[]>(`/events/rotation`),
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useClub(tag: string | undefined) {
+  return useQuery({
+    queryKey: tag ? queryKeys.club(tag) : ["club", "none"],
+    enabled: Boolean(tag),
+    queryFn: () => apiFetch<Club>(`/clubs/${tag!}`),
+    ...playerScoped,
+  });
+}
+
+export function useClubSummary(tag: string | undefined) {
+  return useQuery({
+    queryKey: tag ? queryKeys.clubSummary(tag) : ["club", "summary", "none"],
+    enabled: Boolean(tag),
+    queryFn: () => apiFetch<ClubSummary>(`/analytics/clubs/${tag!}/summary`),
+    ...playerScoped,
+  });
+}
+
+export function usePlayerRankings(country: string) {
+  return useQuery({
+    queryKey: queryKeys.playerRankings(country),
+    queryFn: () =>
+      apiFetch<PlayerRankingList>(`/rankings/${country}/players`),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useClubRankings(country: string) {
+  return useQuery({
+    queryKey: queryKeys.clubRankings(country),
+    queryFn: () => apiFetch<ClubRankingList>(`/rankings/${country}/clubs`),
+    staleTime: 5 * 60_000,
+  });
+}
+
+// ------------------------------------------------------------------
+// Background capture (tracker)
+// ------------------------------------------------------------------
+
+/** Capture status for a tag (poll counters, last error, …). */
+export function useTracker(tag: string | undefined) {
+  return useQuery({
+    queryKey: tag ? queryKeys.tracker(tag) : ["tracker", "none"],
+    enabled: Boolean(tag),
+    queryFn: () => apiFetch<TrackerStatus>(`/tracker/${tag!}`),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Captured trophy timeline (grows while the proxy polls in the background). */
+export function useTrackerTimeline(tag: string | undefined) {
+  return useQuery({
+    queryKey: tag ? queryKeys.trackerTimeline(tag) : ["tracker", "timeline", "none"],
+    enabled: Boolean(tag),
+    queryFn: () => apiFetch<TrackerTimeline>(`/tracker/${tag!}/timeline`),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Full captured battle archive (server-side, past the 25-battle window). */
+export function useTrackerBattles(tag: string | undefined) {
+  return useQuery({
+    queryKey: tag ? queryKeys.trackerBattles(tag) : ["tracker", "battles", "none"],
+    enabled: Boolean(tag),
+    queryFn: () =>
+      apiFetch<TrackerBattles>(`/tracker/${tag!}/battles?limit=200`),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** Activate / refresh background capture for a tag. */
+export function useActivateTracking() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (tag: string) =>
+      apiFetch<TrackerStatus>(`/tracker/${tag}`, { method: "POST" }),
+    onSuccess: (data, tag) => {
+      qc.setQueryData(queryKeys.tracker(tag), data);
+      void qc.invalidateQueries({ queryKey: queryKeys.trackerTimeline(tag) });
+    },
+  });
+}
+
+export function usePlayerCompare(
+  tagA: string | undefined,
+  tagB: string | undefined,
+) {
+  return useQuery({
+    queryKey: tagA && tagB ? queryKeys.compare(tagA, tagB) : ["compare", "none"],
+    enabled: Boolean(tagA && tagB),
+    queryFn: () =>
+      apiFetch<PlayerComparison>(
+        `/analytics/players/${tagA!}/compare/${tagB!}`,
+      ),
+    ...playerScoped,
   });
 }

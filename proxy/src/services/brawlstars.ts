@@ -1,3 +1,4 @@
+import { LRUCache } from "lru-cache";
 import { config } from "../config/config.js";
 import { logger } from "../config/logger.js";
 import { responseCache, TTL, type CacheTTL } from "../config/cache.js";
@@ -44,6 +45,29 @@ const buildQuery = (params?: PaginationParams): string => {
 
 const cacheKey = (path: string): string => `GET ${path}`;
 
+/**
+ * Last-known-good responses kept WITHOUT a TTL, so we can serve a stale value
+ * when the upstream is temporarily unavailable (429 / 5xx / timeout / network)
+ * instead of failing the request. Bounded to avoid unbounded growth.
+ */
+const staleCache = new LRUCache<string, NonNullable<unknown>>({
+  max: config.CACHE_MAX_ITEMS,
+});
+
+/**
+ * In-flight request coalescing: concurrent callers for the same path share a
+ * single upstream fetch. Prevents a refresh burst from multiplying quota usage.
+ */
+const inFlight = new Map<string, Promise<unknown>>();
+
+/** Upstream failures for which serving a stale cached value is preferable. */
+const isTransient = (err: unknown): boolean => {
+  if (err instanceof HttpError) {
+    return err.status === 429 || err.status >= 500;
+  }
+  return true; // network/abort/unknown — transient by nature
+};
+
 async function callUpstream<T>(
   path: string,
   ttl: CacheTTL,
@@ -56,6 +80,28 @@ async function callUpstream<T>(
     return cached;
   }
 
+  // Join an identical request already in flight rather than issuing another.
+  const pending = inFlight.get(key) as Promise<T> | undefined;
+  if (pending) {
+    logger.debug({ path }, "coalesced in-flight request");
+    return pending;
+  }
+
+  const promise = fetchUpstream<T>(path, key, ttl, signal);
+  inFlight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+async function fetchUpstream<T>(
+  path: string,
+  key: string,
+  ttl: CacheTTL,
+  signal?: AbortSignal,
+): Promise<T> {
   const url = `${config.BRAWL_STARS_API_URL}${path}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(
@@ -98,15 +144,35 @@ async function callUpstream<T>(
 
     const data = (await res.json()) as T;
     // Cast through the LRU's non-nullish constraint; we only ever cache JSON objects.
-    responseCache.set(key, data as NonNullable<unknown>, { ttl });
+    const value = data as NonNullable<unknown>;
+    responseCache.set(key, value, { ttl });
+    staleCache.set(key, value); // last-known-good, no TTL
     return data;
   } catch (err) {
-    if (err instanceof HttpError) throw err;
-    if (err instanceof Error && err.name === "AbortError") {
-      throw upstreamTimeout();
+    const normalized =
+      err instanceof HttpError
+        ? err
+        : err instanceof Error && err.name === "AbortError"
+          ? upstreamTimeout()
+          : upstreamUnavailable();
+
+    // Degrade gracefully: on a transient upstream failure, serve the last
+    // successful response for this path rather than erroring the client.
+    if (isTransient(normalized)) {
+      const stale = staleCache.get(key) as T | undefined;
+      if (stale !== undefined) {
+        logger.warn(
+          { path, status: normalized.status },
+          "serving stale cache after upstream failure",
+        );
+        return stale;
+      }
     }
-    logger.error({ err, path }, "upstream request failed");
-    throw upstreamUnavailable();
+
+    if (!(err instanceof HttpError)) {
+      logger.error({ err, path }, "upstream request failed");
+    }
+    throw normalized;
   } finally {
     clearTimeout(timeoutId);
   }

@@ -46,8 +46,45 @@ export function mergeBattles(
   tag: string,
   fresh: BattleLogItem[],
 ): BattleLogItem[] {
+  const existing = loadBattles(tag);
+  const existingIds = new Set(existing.map(battleId));
+
+  // Migration : si le compteur cumulé est vierge mais qu'une archive existe
+  // déjà, on l'amorce une fois depuis les combats déjà stockés.
+  const pt0 = loadPlaytime(tag);
+  if (pt0.sec === 0 && pt0.n === 0 && existing.length > 0) {
+    let s = 0;
+    let c = 0;
+    for (const it of existing) {
+      const d = it.battle.duration;
+      if (typeof d === "number" && d > 0) {
+        s += d;
+        c += 1;
+      }
+    }
+    savePlaytime(tag, { sec: s, n: c });
+  }
+
+  // Cumul du temps de jeu : on ajoute la durée des combats JAMAIS vus, une
+  // seule fois. Le compteur persiste même si le combat est ensuite évincé
+  // de l'archive capée — il continue donc de grandir indéfiniment.
+  let addSec = 0;
+  let addN = 0;
+  for (const item of fresh) {
+    if (existingIds.has(battleId(item))) continue;
+    const d = item.battle.duration;
+    if (typeof d === "number" && d > 0) {
+      addSec += d;
+      addN += 1;
+    }
+  }
+  if (addSec > 0 || addN > 0) {
+    const pt = loadPlaytime(tag);
+    savePlaytime(tag, { sec: pt.sec + addSec, n: pt.n + addN });
+  }
+
   const seen = new Map<string, BattleLogItem>();
-  for (const item of loadBattles(tag)) seen.set(battleId(item), item);
+  for (const item of existing) seen.set(battleId(item), item);
   // Fresh items overwrite stored ones (in case the API enriches a field).
   for (const item of fresh) seen.set(battleId(item), item);
 
@@ -59,9 +96,45 @@ export function mergeBattles(
   return capped;
 }
 
+/* ---------- Temps de jeu cumulé (persiste au-delà du cap de l'archive) ---------- */
+const PLAYTIME_PREFIX = "playtime:";
+const ptKey = (tag: string) =>
+  `${PLAYTIME_PREFIX}${tag.replace(/^#/, "").toUpperCase()}`;
+
+export interface Playtime {
+  /** Secondes cumulées en combat. */
+  sec: number;
+  /** Nombre de combats comptés. */
+  n: number;
+}
+
+export function loadPlaytime(tag: string): Playtime {
+  try {
+    const raw = localStorage.getItem(ptKey(tag));
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<Playtime>;
+      if (typeof p?.sec === "number" && typeof p?.n === "number") {
+        return { sec: p.sec, n: p.n };
+      }
+    }
+  } catch {
+    /* noop */
+  }
+  return { sec: 0, n: 0 };
+}
+
+function savePlaytime(tag: string, v: Playtime): void {
+  try {
+    localStorage.setItem(ptKey(tag), JSON.stringify(v));
+  } catch {
+    /* noop */
+  }
+}
+
 export function clearBattles(tag: string): void {
   try {
     localStorage.removeItem(key(tag));
+    localStorage.removeItem(ptKey(tag));
   } catch {
     /* noop */
   }

@@ -4,6 +4,11 @@ build
 coverage
 *.log
 *.env
+.env
+# Background-capture store (proxy tracker)
+proxy/data/
+# Maquette Claude Design temporaire (non versionnée)
+client/brawl-analytics-refonte/
 .DS_Store
 .idea
 .vscode

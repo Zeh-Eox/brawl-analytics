@@ -1,669 +1,320 @@
+import { useMemo, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import type { PlayerProfileAnalytics } from "../../types/analytics";
-import type { PlayerBrawler } from "../../types/brawlstars";
 import { Card } from "../ui/Card";
-import { Badge } from "../ui/Badge";
+import { Stat } from "../ui/Stat";
+import { SectionTitle } from "../ui/SectionTitle";
+import { RadialGauge } from "../ui/RadialGauge";
 import { Img } from "../ui/Img";
-import { useAccumulatedBattles } from "../../hooks/useAccumulatedBattles";
-import { fmtDuration, fmtNum, fmtPercent } from "../../utils/format";
 import { cdn } from "../../utils/cdn";
-import { cn } from "../../utils/cn";
-import { displayTag } from "../../utils/tag";
+import { fmtNum, fmtPercent, fmtDuration, fmtMode, relativeTime, fmtPlaytime, fmtHours } from "../../utils/format";
+import { prettyBrawlerName } from "../../utils/brawlerName";
+import { previousVisit } from "../../utils/profileHistory";
+import { loadPlaytime } from "../../utils/battleStore";
+import { estimateLifetimeSeconds } from "../../utils/playtime";
+import { useAccumulatedBattles } from "../../hooks/useAccumulatedBattles";
+import { accentHex } from "../ui/accent";
+import {
+  IconTrophy, IconSwords, IconFire, IconSparkles, IconStar, IconBolt,
+  IconCrown, IconRobot, IconMedal, IconArrowRight, IconClub, IconClock, type IconProps,
+} from "../ui/icons";
 
 const MAX_POWER = 11;
-const MAX_RANK = 35;
+
+function battleMs(raw: string): number {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(raw);
+  if (!m) return 0;
+  const [, y, mo, d, h, mi, s] = m;
+  return Date.parse(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`);
+}
+const resultColor = (r?: string) =>
+  r === "victory" ? accentHex.success : r === "defeat" ? accentHex.danger : accentHex.neutral;
 
 export function OverviewTab({
   profile,
   tag,
+  onOpenBrawler,
 }: {
   profile: PlayerProfileAnalytics;
   tag: string;
+  onOpenBrawler: (id: number) => void;
 }) {
   const { player, summary } = profile;
-  const accumulated = useAccumulatedBattles(tag);
-  const battlelog =
-    accumulated.analytics &&
-    accumulated.analytics.totalBattles >= (profile.battlelog?.totalBattles ?? 0)
-      ? accumulated.analytics
-      : profile.battlelog;
+  const navigate = useNavigate();
+  const acc = useAccumulatedBattles(tag);
+  const analytics = acc.analytics ?? profile.battlelog;
 
-  const topBrawlers = [...player.brawlers]
-    .sort((a, b) => b.trophies - a.trophies)
-    .slice(0, 6);
-  const bestBrawler = topBrawlers[0] ?? null;
+  const prev = useMemo(() => previousVisit(tag), [tag]);
+  const sinceVisit = useMemo(() => {
+    if (!prev) return null;
+    const prevMs = new Date(prev.t).getTime();
+    const recent = acc.items.filter((b) => battleMs(b.battleTime) > prevMs);
+    const wins = recent.filter((b) => b.battle.result === "victory").length;
+    const losses = recent.filter((b) => b.battle.result === "defeat").length;
+    return {
+      trophyDelta: player.trophies - prev.trophies,
+      brawlerDelta: summary.brawlers.owned - prev.brawlers,
+      wins,
+      losses,
+      when: relativeTime(prev.t),
+      streak: acc.analytics?.currentStreak ?? null,
+    };
+  }, [prev, acc.items, acc.analytics, player.trophies, summary.brawlers.owned]);
 
-  const showdownTotal = player.soloVictories + player.duoVictories;
-  const hasPowerPlay =
-    typeof player.highestPowerPlayPoints === "number" &&
-    player.highestPowerPlayPoints > 0;
+  const maxRank = useMemo(() => player.brawlers.reduce((m, b) => Math.max(m, b.rank), 0), [player.brawlers]);
+  const topBrawlers = useMemo(
+    () => [...player.brawlers].sort((a, b) => b.trophies - a.trophies).slice(0, 8),
+    [player.brawlers],
+  );
+  const best = topBrawlers[0] ?? null;
+  const recentForm = acc.items.slice(0, 10);
+  const club = "tag" in player.club ? player.club : null;
+
+  const playtime = useMemo(() => loadPlaytime(tag), [tag, acc.items]);
+  const estLifetimeSec = useMemo(
+    () =>
+      estimateLifetimeSeconds(
+        summary.totalVictories,
+        analytics?.winRate,
+        analytics?.averageDurationSeconds,
+      ),
+    [analytics, summary.totalVictories],
+  );
+
+  const victories = [
+    { label: "Victoires 3v3", value: player["3vs3Victories"], accent: "success" as const },
+    { label: "Solo Showdown", value: player.soloVictories, accent: "gold" as const },
+    { label: "Duo Showdown", value: player.duoVictories, accent: "cyan" as const },
+    { label: "Total", value: summary.totalVictories, accent: "neutral" as const },
+  ];
+
+  const kit = [
+    { label: "Star Powers", ratio: summary.completion.starPowers, total: summary.brawlers.totalStarPowers, accent: "bg-gold" },
+    { label: "Gadgets", ratio: summary.completion.gadgets, total: summary.brawlers.totalGadgets, accent: "bg-success" },
+    { label: "Gears", ratio: summary.completion.gears, total: summary.brawlers.totalGears, accent: "bg-cyan" },
+  ];
+
+  const records = [
+    { Icon: IconBolt, label: "Niveau", value: fmtNum(player.expLevel), sub: `${fmtNum(player.expPoints)} XP` },
+    { Icon: IconTrophy, label: "Pic de trophées", value: fmtNum(player.highestTrophies), sub: `actuel ${fmtNum(player.trophies)}` },
+    { Icon: IconSwords, label: "Total victoires", value: fmtNum(summary.totalVictories), sub: `${fmtNum(player["3vs3Victories"])} en 3v3` },
+    analytics && analytics.longestWinStreak > 0
+      ? { Icon: IconFire, label: "Plus longue série", value: `${analytics.longestWinStreak} V`, sub: `sur ${analytics.countedBattles} matchs` }
+      : null,
+    player.bestRoboRumbleTime > 0
+      ? { Icon: IconRobot, label: "Best Robo Rumble", value: `Niv. ${player.bestRoboRumbleTime}`, sub: "en coop" }
+      : null,
+    player.bestTimeAsBigBrawler > 0
+      ? { Icon: IconCrown, label: "Best Big Brawler", value: fmtDuration(player.bestTimeAsBigBrawler), sub: "survie en Big Game" }
+      : null,
+    typeof player.highestPowerPlayPoints === "number" && player.highestPowerPlayPoints > 0
+      ? { Icon: IconMedal, label: "Power Play (legacy)", value: fmtNum(player.highestPowerPlayPoints), sub: "record d'avant Ranked" }
+      : null,
+  ].filter(Boolean) as { Icon: (p: IconProps) => ReactNode; label: string; value: string; sub: string }[];
 
   return (
-    <div className="grid grid-cols-12 gap-4 mt-4">
-      {/* ──────────────────────────────────────────────────────────────
-       *  IDENTITÉ — icône, pseudo, club
-       * ────────────────────────────────────────────────────────────── */}
-      <Card className="col-span-12 lg:col-span-5" padding="lg">
-        <SectionTitle>Profil</SectionTitle>
-        <div className="flex items-center gap-4 mb-4">
-          <div className="shrink-0 w-20 h-20 rounded-full bg-gradient-to-br from-brand-yellow to-brand-magenta p-[2px] glow-yellow">
-            <Img
-              src={
-                player.icon?.id ? cdn.playerIcon(player.icon.id) : undefined
-              }
-              alt={player.name}
-              wrapperClassName="w-full h-full rounded-full bg-bg-surface"
-              fit="cover"
-              fallback={
-                <span className="display text-brand-yellow text-2xl">
-                  {player.name.slice(0, 2).toUpperCase()}
-                </span>
-              }
-            />
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+      {/* depuis ta dernière visite */}
+      {sinceVisit && (
+        <div className="rounded-2xl border border-violet/25 bg-gradient-to-br from-violet/15 to-cyan/5 p-4 lg:col-span-12">
+          <div className="mb-3 flex items-center gap-2 text-violet">
+            <IconSparkles size={16} />
+            <span className="text-[12px] font-bold tracking-wide text-violet">Depuis ta dernière visite</span>
+            <span className="ml-auto text-[11px] text-dim">{sinceVisit.when}</span>
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="display text-2xl truncate">{player.name}</div>
-            <div className="display text-brand-yellow text-sm">
-              {displayTag(player.tag)}
-            </div>
-            {player.nameColor && (
-              <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-text-dim">
-                <span
-                  className="w-3 h-3 rounded-full ring-1 ring-white/15"
-                  style={{ background: nameColorToCss(player.nameColor) }}
-                />
-                <span className="font-mono">{player.nameColor}</span>
-              </div>
-            )}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Stat align="center" accent={sinceVisit.trophyDelta >= 0 ? "success" : "danger"} value={`${sinceVisit.trophyDelta >= 0 ? "+" : ""}${fmtNum(sinceVisit.trophyDelta)}`} label="Trophées" />
+            <Stat align="center" value={<>{sinceVisit.wins}<span className="text-dim text-base">/{sinceVisit.losses}</span></>} label="V / D" />
+            <Stat align="center" accent="magenta" value={sinceVisit.streak?.type === "victory" ? <span className="inline-flex items-center gap-0.5"><IconFire size={16} />{sinceVisit.streak.length}</span> : "—"} label="Série" />
+            <Stat align="center" accent="cyan" value={`${sinceVisit.brawlerDelta >= 0 ? "+" : ""}${sinceVisit.brawlerDelta}`} label="Brawler" />
           </div>
         </div>
+      )}
 
-        <KV label="Icône (ID)" value={`#${player.icon?.id ?? "—"}`} />
-        <KV
-          label="Club"
-          value={
-            "tag" in player.club && typeof player.club.tag === "string"
-              ? `${player.club.name}  ·  ${displayTag(player.club.tag)}`
-              : "Sans club"
-          }
-        />
-        <KV
-          label="Championship"
-          value={
-            player.isQualifiedFromChampionshipChallenge
-              ? "Qualifié ✓"
-              : "Non qualifié"
-          }
-          accent={
-            player.isQualifiedFromChampionshipChallenge ? "success" : undefined
-          }
-        />
-      </Card>
-
-      {/* ──────────────────────────────────────────────────────────────
-       *  TROPHÉES + XP — chiffres complets, pas d'abréviation
-       * ────────────────────────────────────────────────────────────── */}
-      <BigStatCard
-        className="col-span-12 md:col-span-6 lg:col-span-4"
-        label="Trophées"
-        icon="🏆"
-        accent="yellow"
-        primary={fmtNum(player.trophies)}
-        secondary={`record ${fmtNum(player.highestTrophies)}`}
-        progressLabel="Vs record personnel"
-        progress={player.trophies / Math.max(1, player.highestTrophies)}
-      />
-
-      <BigStatCard
-        className="col-span-12 md:col-span-6 lg:col-span-3"
-        label="Niveau"
-        icon="⚡"
-        accent="cyan"
-        primary={fmtNum(player.expLevel)}
-        secondary={`${fmtNum(player.expPoints)} pts d'XP`}
-      />
-
-      {/* ──────────────────────────────────────────────────────────────
-       *  VICTOIRES — 3v3 / Solo / Duo séparés
-       * ────────────────────────────────────────────────────────────── */}
-      <Card className="col-span-12" padding="md">
+      {/* victoires */}
+      <Card padding="lg" className="lg:col-span-5">
         <SectionTitle>Victoires</SectionTitle>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <VictoryStat
-            mode="3v3"
-            value={player["3vs3Victories"]}
-            accent="yellow"
-            note="Gem Grab, Brawl Ball, Heist, Bounty, Hot Zone, Knockout…"
-          />
-          <VictoryStat
-            mode="Solo Showdown"
-            value={player.soloVictories}
-            accent="magenta"
-            note="Top 1 en solo (jusqu'à 10 joueurs)"
-          />
-          <VictoryStat
-            mode="Duo Showdown"
-            value={player.duoVictories}
-            accent="cyan"
-            note="Top 1 en équipe de 2 (jusqu'à 5 paires)"
-          />
+        <div className="grid grid-cols-2 gap-3">
+          {victories.map((v) => (
+            <div key={v.label} className="rounded-xl border border-line bg-white/3 px-3 py-2.5">
+              <Stat value={fmtNum(v.value)} label={v.label} accent={v.accent} size="sm" />
+            </div>
+          ))}
         </div>
-        <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between flex-wrap gap-3">
-          <span className="text-text-muted text-sm">
-            Total victoires{" "}
-            <span className="text-text-dim">(3v3 + Showdown solo + duo)</span>
-          </span>
-          <div className="display text-2xl text-gradient-y">
-            {fmtNum(summary.totalVictories)}
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-center justify-between text-[11px] font-semibold text-muted">
+            <span>3v3</span>
+            <span>Showdown (solo + duo)</span>
           </div>
-          <div className="text-text-dim text-xs">
-            dont {fmtNum(showdownTotal)} en showdown
+          <div className="flex h-2.5 overflow-hidden rounded-full bg-white/6">
+            <div className="h-full bg-success" style={{ width: `${pct(player["3vs3Victories"], summary.totalVictories)}%` }} />
+            <div className="h-full bg-gold" style={{ width: `${pct(player.soloVictories, summary.totalVictories)}%` }} />
+            <div className="h-full bg-cyan" style={{ width: `${pct(player.duoVictories, summary.totalVictories)}%` }} />
           </div>
         </div>
       </Card>
 
-      {/* ──────────────────────────────────────────────────────────────
-       *  COLLECTION DE BRAWLERS
-       * ────────────────────────────────────────────────────────────── */}
-      <Card className="col-span-12 lg:col-span-7" padding="md">
+      {/* collection */}
+      <Card padding="lg" className="lg:col-span-7">
         <SectionTitle>Collection</SectionTitle>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MiniStat
-            label="Brawlers"
-            value={fmtNum(summary.brawlers.owned)}
-            sub="possédés"
-            accent="yellow"
-          />
-          <MiniStat
-            label="Power 11"
-            value={fmtNum(summary.brawlers.maxedOut)}
-            sub={`sur ${summary.brawlers.owned}`}
-            accent="yellow"
-          />
-          <MiniStat
-            label="Power moyen"
-            value={summary.brawlers.averagePower.toFixed(1)}
-            sub={`sur ${MAX_POWER}`}
-            accent="cyan"
-          />
+        <div className="grid grid-cols-4 gap-2">
+          <Stat align="center" size="sm" value={fmtNum(summary.brawlers.owned)} label="Possédés" />
+          <Stat align="center" size="sm" accent="gold" value={fmtNum(summary.brawlers.maxedOut)} label="Power 11" />
+          <Stat align="center" size="sm" accent="violet" value={summary.brawlers.averagePower.toFixed(1)} label="Power moy." />
+          <Stat align="center" size="sm" accent="cyan" value={maxRank || "—"} label="Rank max" />
         </div>
-
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          <KitBar
-            label="Star Powers"
-            value={summary.brawlers.totalStarPowers}
-            max={summary.brawlers.owned * 2}
-            ratio={summary.completion.starPowers}
-            accent="yellow"
-          />
-          <KitBar
-            label="Gadgets"
-            value={summary.brawlers.totalGadgets}
-            max={summary.brawlers.owned * 2}
-            ratio={summary.completion.gadgets}
-            accent="cyan"
-          />
-          <KitBar
-            label="Gears"
-            value={summary.brawlers.totalGears}
-            max={summary.brawlers.owned * 5}
-            ratio={summary.completion.gears}
-            accent="violet"
-          />
-        </div>
-
-        <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between flex-wrap gap-3">
-          <span className="text-text-muted text-sm">Complétion globale</span>
-          <div className="display text-2xl text-gradient-y">
-            {fmtPercent(summary.completion.overall, 1)}
+        <div className="mt-4 space-y-2.5">
+          {kit.map((k) => (
+            <div key={k.label}>
+              <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-muted">
+                <span>{k.label}</span>
+                <span className="text-text-2">{fmtNum(k.total)} · {fmtPercent(k.ratio, 0)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white/6">
+                <div className={`h-full rounded-full ${k.accent}`} style={{ width: `${Math.round(k.ratio * 100)}%` }} />
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center justify-between pt-1 text-[12px] font-semibold text-muted">
+            <span>Complétion globale du kit</span>
+            <span className="text-gold">{fmtPercent(summary.completion.overall, 0)}</span>
           </div>
         </div>
       </Card>
 
-      {/* ──────────────────────────────────────────────────────────────
-       *  MEILLEUR BRAWLER
-       * ────────────────────────────────────────────────────────────── */}
-      <Card className="col-span-12 lg:col-span-5" padding="md">
-        <SectionTitle>Meilleur brawler</SectionTitle>
-        {bestBrawler ? (
-          <BestBrawler brawler={bestBrawler} />
+      {/* aperçu combat */}
+      <Card padding="lg" className="lg:col-span-5">
+        <SectionTitle
+          action={
+            analytics && analytics.countedBattles > 0 ? (
+              <button onClick={() => navigate(`/player/${tag}?tab=analytics`)} className="inline-flex items-center gap-1 text-[12px] font-semibold text-cyan">
+                Analytics <IconArrowRight size={13} />
+              </button>
+            ) : undefined
+          }
+        >
+          Combat récent
+        </SectionTitle>
+        {analytics && analytics.countedBattles > 0 ? (
+          <div className="flex items-center gap-4">
+            <RadialGauge value={analytics.winRate} center={fmtPercent(analytics.winRate, 0)} label="Win rate" accent="success" size={96} />
+            <div className="min-w-0 flex-1 space-y-2.5">
+              <div>
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Forme récente</div>
+                <div className="flex flex-wrap gap-1">
+                  {recentForm.map((b, i) => (
+                    <span key={i} className="h-2.5 w-2.5 rounded-full" style={{ background: resultColor(b.battle.result) }} />
+                  ))}
+                </div>
+              </div>
+              {analytics.favoriteMode && (
+                <Line label="Mode favori" value={fmtMode(analytics.favoriteMode)} />
+              )}
+              {analytics.favoriteBrawler && (
+                <Line label="Brawler favori" value={prettyBrawlerName(analytics.favoriteBrawler.name)} />
+              )}
+              <Line label="Série en cours" value={
+                analytics.currentStreak.type
+                  ? `${analytics.currentStreak.length} ${analytics.currentStreak.type === "victory" ? "V" : analytics.currentStreak.type === "defeat" ? "D" : "N"}`
+                  : "—"
+              } />
+            </div>
+          </div>
         ) : (
-          <div className="text-text-muted text-sm">Aucun brawler.</div>
+          <div className="py-6 text-center text-[13px] text-text-2">Pas encore de combats analysés.</div>
         )}
       </Card>
 
-      {/* ──────────────────────────────────────────────────────────────
-       *  TOP BRAWLERS (carousel visuel avec portraits CDN)
-       * ────────────────────────────────────────────────────────────── */}
-      <Card className="col-span-12" padding="md">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <SectionTitle className="!mb-0">Top 6 brawlers</SectionTitle>
-          <span className="text-text-dim text-xs">
-            triés par trophées actuels
-          </span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-          {topBrawlers.map((b) => (
-            <div
-              key={b.id}
-              className="surface rounded-xl p-2 flex flex-col items-center gap-2 text-center"
-            >
-              <Img
-                src={cdn.brawlerBorder(b.id)}
-                alt={b.name}
-                wrapperClassName="w-16 h-16"
-                fallback={
-                  <span className="display text-brand-yellow text-xs">
-                    {b.name.slice(0, 2)}
-                  </span>
-                }
-              />
-              <div className="display text-xs truncate w-full">{b.name}</div>
-              <div className="display text-sm text-brand-yellow leading-none">
-                {fmtNum(b.trophies)}
+      {/* brawler du moment */}
+      {best && (
+        <button onClick={() => onOpenBrawler(best.id)} className="w-full text-left lg:col-span-7">
+          <div className="relative h-full overflow-hidden rounded-2xl border border-gold/28 bg-gradient-to-br from-gold/14 via-magenta/5 to-transparent p-4 glow-gold">
+            <div className="mb-2 inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-gold"><IconStar size={12} filled /> Brawler du moment</div>
+            <div className="flex items-center gap-3">
+              <Img src={cdn.brawlerBorderless(best.id)} alt={best.name} wrapperClassName="h-16 w-16 shrink-0" fallback={<span className="display text-gold">{best.name.slice(0, 2)}</span>} />
+              <div className="min-w-0 flex-1">
+                <div className="display text-xl text-white">{prettyBrawlerName(best.name)}</div>
+                <div className="text-[12px] text-text-2">Rank {best.rank} · Power {best.power}/{MAX_POWER} · record {fmtNum(best.highestTrophies)}</div>
+                {club && <div className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan"><IconClub size={12} /> {club.name}</div>}
               </div>
-              <div className="text-text-dim text-[10px]">
-                P{b.power} · R{b.rank}
+              <div className="display inline-flex items-center gap-1 text-2xl text-gold"><IconTrophy size={20} />{fmtNum(best.trophies)}</div>
+            </div>
+          </div>
+        </button>
+      )}
+
+      {/* temps de jeu */}
+      <Card padding="lg" className="lg:col-span-12">
+        <SectionTitle
+          action={
+            <button onClick={() => navigate(`/player/${tag}?tab=analytics`)} className="inline-flex items-center gap-1 text-[12px] font-semibold text-cyan">
+              Détails <IconArrowRight size={13} />
+            </button>
+          }
+        >
+          Temps de jeu
+        </SectionTitle>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex items-center gap-3 rounded-xl border border-cyan/20 bg-cyan/5 p-4">
+            <span className="text-cyan"><IconClock size={24} /></span>
+            <div>
+              <div className="display text-2xl text-cyan">{fmtPlaytime(playtime.sec)}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                Temps suivi (en match) · {playtime.n} combats
               </div>
             </div>
+          </div>
+          <div className="rounded-xl border border-gold/20 bg-gold/5 p-4">
+            <div className="display text-2xl text-gold">≈ {fmtHours(estLifetimeSec)}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Estimation à vie
+              <span className="rounded bg-white/10 px-1 py-0.5 text-[8px] font-semibold normal-case text-text-2">~ grossière</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* top brawlers */}
+      <Card padding="lg" className="lg:col-span-12">
+        <SectionTitle>Top brawlers</SectionTitle>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-8">
+          {topBrawlers.map((b) => (
+            <button key={b.id} onClick={() => onOpenBrawler(b.id)} className="flex flex-col items-center gap-1.5 rounded-2xl border border-line bg-white/3 p-2.5 card-hover">
+              <Img src={cdn.brawlerBorderless(b.id)} alt={b.name} wrapperClassName="h-12 w-12" fallback={<span className="display text-[10px] text-gold">{b.name.slice(0, 2)}</span>} />
+              <div className="w-full truncate text-center text-[10.5px] font-bold text-text">{prettyBrawlerName(b.name)}</div>
+              <div className="display inline-flex items-center gap-0.5 text-[12px] text-gold"><IconTrophy size={12} />{fmtNum(b.trophies)}</div>
+            </button>
           ))}
         </div>
       </Card>
 
-      {/* ──────────────────────────────────────────────────────────────
-       *  RECORDS PERSONNELS
-       * ────────────────────────────────────────────────────────────── */}
-      <Card className="col-span-12" padding="md">
+      {/* records */}
+      <Card padding="lg" className="lg:col-span-12">
         <SectionTitle>Records personnels</SectionTitle>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <Record
-            label="Trophées (pic historique)"
-            value={fmtNum(player.highestTrophies)}
-            sub={`actuel ${fmtNum(player.trophies)}`}
-            icon="🏆"
-            accent="yellow"
-          />
-          <Record
-            label="Meilleur brawler"
-            value={
-              bestBrawler ? fmtNum(bestBrawler.highestTrophies) : "—"
-            }
-            sub={bestBrawler?.name ?? "—"}
-            icon="⭐"
-            accent="magenta"
-          />
-          <Record
-            label="Niveau XP atteint"
-            value={fmtNum(player.expLevel)}
-            sub={`${fmtNum(player.expPoints)} XP total`}
-            icon="⚡"
-            accent="cyan"
-          />
-          <Record
-            label="Total victoires"
-            value={fmtNum(summary.totalVictories)}
-            sub={`${fmtNum(player["3vs3Victories"])} en 3v3`}
-            icon="⚔"
-            accent="violet"
-          />
-          <Record
-            label="Best Robo Rumble"
-            value={
-              player.bestRoboRumbleTime > 0
-                ? formatRoboTime(player.bestRoboRumbleTime)
-                : "—"
-            }
-            sub="niveau atteint en coop"
-            icon="🤖"
-            accent="violet"
-          />
-          <Record
-            label="Best en Big Brawler"
-            value={
-              player.bestTimeAsBigBrawler > 0
-                ? fmtDuration(player.bestTimeAsBigBrawler)
-                : "—"
-            }
-            sub="temps de survie en Big Game"
-            icon="👑"
-            accent="yellow"
-          />
-          {hasPowerPlay && (
-            <Record
-              label="Power Play (legacy)"
-              value={fmtNum(player.highestPowerPlayPoints!)}
-              sub="record d'avant Ranked"
-              icon="🎖"
-              accent="magenta"
-            />
-          )}
-          {battlelog && battlelog.longestWinStreak > 0 && (
-            <Record
-              label="Plus longue série"
-              value={`${battlelog.longestWinStreak} V`}
-              sub={`sur ${battlelog.countedBattles} matchs analysés`}
-              icon="🔥"
-              accent="success"
-            />
-          )}
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+          {records.map((r) => (
+            <div key={r.label} className="rounded-xl border border-line bg-white/3 px-3 py-3">
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{r.label}</span>
+                <span className="text-muted"><r.Icon size={16} /></span>
+              </div>
+              <div className="display text-xl text-text">{r.value}</div>
+              <div className="mt-0.5 truncate text-[10.5px] text-dim">{r.sub}</div>
+            </div>
+          ))}
         </div>
       </Card>
     </div>
   );
 }
 
-// ============================================================
-//                   Sub-components
-// ============================================================
+const pct = (n: number, total: number) => (total > 0 ? (n / total) * 100 : 0);
 
-function SectionTitle({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+function Line({ label, value }: { label: string; value: string }) {
   return (
-    <h3
-      className={cn(
-        "display text-xs uppercase tracking-widest text-text-muted mb-3",
-        className,
-      )}
-    >
-      {children}
-    </h3>
-  );
-}
-
-function KV({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: "success" | "danger" | "warning";
-}) {
-  const c = {
-    success: "text-success",
-    danger: "text-danger",
-    warning: "text-warning",
-  };
-  return (
-    <div className="flex items-baseline justify-between py-1.5 border-b border-white/5 last:border-0 gap-3">
-      <span className="text-text-muted text-xs">{label}</span>
-      <span
-        className={cn(
-          "text-sm font-semibold truncate text-right",
-          accent && c[accent],
-        )}
-      >
-        {value}
-      </span>
+    <div className="flex items-baseline justify-between gap-2 border-b border-white/5 pb-1 text-[12px] last:border-0">
+      <span className="text-muted">{label}</span>
+      <span className="truncate font-semibold text-text">{value}</span>
     </div>
   );
-}
-
-function BigStatCard({
-  className,
-  label,
-  icon,
-  accent,
-  primary,
-  secondary,
-  progressLabel,
-  progress,
-}: {
-  className?: string;
-  label: string;
-  icon: string;
-  accent: "yellow" | "magenta" | "cyan" | "violet";
-  primary: string;
-  secondary: string;
-  progressLabel?: string;
-  progress?: number;
-}) {
-  const color = {
-    yellow: "text-brand-yellow",
-    magenta: "text-brand-magenta",
-    cyan: "text-brand-cyan",
-    violet: "text-brand-violet",
-  }[accent];
-  const fill = {
-    yellow: "bg-brand-yellow",
-    magenta: "bg-brand-magenta",
-    cyan: "bg-brand-cyan",
-    violet: "bg-brand-violet",
-  }[accent];
-  return (
-    <Card className={className} padding="lg">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-text-muted text-xs uppercase tracking-wider">
-          {label}
-        </span>
-        <span className="text-2xl leading-none" aria-hidden>
-          {icon}
-        </span>
-      </div>
-      <div className={cn("display text-4xl md:text-5xl mt-1", color)}>
-        {primary}
-      </div>
-      <div className="text-text-dim text-xs mt-1">{secondary}</div>
-      {progress !== undefined && progressLabel && (
-        <div className="mt-4">
-          <div className="flex justify-between items-baseline mb-1.5">
-            <span className="text-text-muted text-xs">{progressLabel}</span>
-            <span className="font-mono text-text-base text-xs">
-              {fmtPercent(progress, 1)}
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-            <div
-              className={cn("h-full rounded-full transition-all", fill)}
-              style={{ width: `${Math.min(100, progress * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function VictoryStat({
-  mode,
-  value,
-  note,
-  accent,
-}: {
-  mode: string;
-  value: number;
-  note: string;
-  accent: "yellow" | "magenta" | "cyan";
-}) {
-  const color = {
-    yellow: "text-brand-yellow",
-    magenta: "text-brand-magenta",
-    cyan: "text-brand-cyan",
-  }[accent];
-  return (
-    <div className="surface rounded-xl p-4">
-      <div className="text-text-muted text-xs uppercase tracking-wider">
-        {mode}
-      </div>
-      <div className={cn("display text-3xl mt-1", color)}>{fmtNum(value)}</div>
-      <div className="text-text-dim text-[11px] mt-2 leading-relaxed">
-        {note}
-      </div>
-    </div>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  accent: "yellow" | "magenta" | "cyan" | "violet";
-}) {
-  const color = {
-    yellow: "text-brand-yellow",
-    magenta: "text-brand-magenta",
-    cyan: "text-brand-cyan",
-    violet: "text-brand-violet",
-  }[accent];
-  return (
-    <div className="surface rounded-xl p-3">
-      <div className="text-text-muted text-[10px] uppercase tracking-wider">
-        {label}
-      </div>
-      <div className={cn("display text-2xl leading-none mt-1", color)}>
-        {value}
-      </div>
-      <div className="text-text-dim text-[10px] mt-1">{sub}</div>
-    </div>
-  );
-}
-
-function KitBar({
-  label,
-  value,
-  max,
-  ratio,
-  accent,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  ratio: number;
-  accent: "yellow" | "cyan" | "violet";
-}) {
-  const fill = {
-    yellow: "bg-brand-yellow",
-    cyan: "bg-brand-cyan",
-    violet: "bg-brand-violet",
-  }[accent];
-  return (
-    <div>
-      <div className="flex justify-evenly items-baseline mb-1.5">
-        <span className="text-sm text-text-muted">{label}</span>
-        <span className="font-mono text-text-base text-xs">
-          {value}/{max}
-        </span>
-      </div>
-      {/* <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-        <div
-          className={cn("h-full rounded-full transition-all", fill)}
-          style={{ width: `${Math.min(100, ratio * 100)}%` }}
-        />
-      </div> */}
-      {/* <div className="text-text-dim text-[10px] mt-0.5">
-        {fmtPercent(ratio, 1)} complet
-      </div> */}
-    </div>
-  );
-}
-
-function Record({
-  label,
-  value,
-  sub,
-  icon,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  icon: string;
-  accent: "yellow" | "magenta" | "cyan" | "violet" | "success";
-}) {
-  const color = {
-    yellow: "text-brand-yellow",
-    magenta: "text-brand-magenta",
-    cyan: "text-brand-cyan",
-    violet: "text-brand-violet",
-    success: "text-success",
-  }[accent];
-  return (
-    <div className="surface rounded-xl p-4">
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <span className="text-text-muted text-[10px] uppercase tracking-wider leading-tight">
-          {label}
-        </span>
-        <span className="text-xl leading-none" aria-hidden>
-          {icon}
-        </span>
-      </div>
-      <div className={cn("display text-2xl leading-none mt-2", color)}>
-        {value}
-      </div>
-      <div className="text-text-dim text-[11px] mt-1.5 truncate">{sub}</div>
-    </div>
-  );
-}
-
-function BestBrawler({ brawler: b }: { brawler: PlayerBrawler }) {
-  return (
-    <div className="flex items-center gap-4">
-      <Img
-        src={cdn.brawlerBorder(b.id)}
-        alt={b.name}
-        wrapperClassName="shrink-0 w-24 h-24"
-        fallback={
-          <span className="display text-brand-yellow text-lg">
-            {b.name.slice(0, 2)}
-          </span>
-        }
-      />
-      <div className="min-w-0 flex-1">
-        <div className="display text-2xl truncate">{b.name}</div>
-        <div className="text-text-dim text-xs">#{b.id}</div>
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          <Badge tone={b.power >= MAX_POWER ? "yellow" : "neutral"}>
-            P{b.power}
-          </Badge>
-          <Badge tone={b.rank >= MAX_RANK ? "magenta" : "neutral"}>
-            R{b.rank}
-          </Badge>
-          <Badge tone="cyan">{b.starPowers.length}/2 SP</Badge>
-          <Badge tone="cyan">{b.gadgets.length}/3 GA</Badge>
-        </div>
-      </div>
-      <div className="text-right shrink-0">
-        <div className="display text-3xl text-brand-yellow leading-none">
-          {fmtNum(b.trophies)}
-        </div>
-        <div className="text-text-dim text-[10px] mt-1">
-          record {fmtNum(b.highestTrophies)}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-//                       Helpers
-// ============================================================
-
-/**
- * Brawl Stars `nameColor` is encoded as "0xAARRGGBB" (the Supercell engine
- * embeds the alpha in the high byte). Strip the alpha to get a usable CSS
- * color.
- */
-function nameColorToCss(raw: string | undefined): string {
-  if (!raw) return "transparent";
-  const m = /^0x([0-9a-fA-F]{8})$/.exec(raw);
-  if (!m) return raw;
-  const hex = m[1]!.slice(2); // drop AA
-  return `#${hex}`;
-}
-
-/**
- * `bestRoboRumbleTime` is exposed as an integer "level reached" (per the
- * Supercell API contract), not seconds. Display it as a rank.
- */
-function formatRoboTime(level: number): string {
-  return `Niveau ${level}`;
 }

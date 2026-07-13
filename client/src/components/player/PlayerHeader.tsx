@@ -1,150 +1,170 @@
-import { motion } from "framer-motion";
+import { useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Player } from "../../types/brawlstars";
-import { fmtCompact, fmtNum } from "../../utils/format";
+import { Avatar } from "../ui/Avatar";
 import { Skeleton } from "../ui/Skeleton";
-import { Img } from "../ui/Img";
+import { IconTrophy, IconMedal, IconStar, IconSwords, IconShare, IconClub } from "../ui/icons";
+import { cn } from "../../utils/cn";
 import { displayTag } from "../../utils/tag";
-import { cdn } from "../../utils/cdn";
+import { fmtNum } from "../../utils/format";
+import { nameColorToCss } from "../../utils/color";
+import { isFavorite, toggleFavorite } from "../../utils/favorites";
 
-const TROPHY = "🏆";
+export function PlayerHeader({
+  player,
+  tag,
+  onShare,
+}: {
+  player: Player;
+  tag: string;
+  onShare: () => void;
+}) {
+  const navigate = useNavigate();
+  const [pinned, setPinned] = useState(() => isFavorite(tag));
+  const club = "tag" in player.club ? player.club : null;
 
-const hasClub = (p: Player): p is Player & { club: { tag: string; name: string } } =>
-  "tag" in p.club && typeof (p.club as { tag?: string }).tag === "string";
+  function togglePin() {
+    toggleFavorite({
+      tag,
+      name: player.name,
+      iconId: player.icon?.id,
+      trophies: player.trophies,
+    });
+    setPinned((v) => !v);
+  }
 
-export function PlayerHeader({ player }: { player: Player }) {
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="surface-elevated relative overflow-hidden rounded-2xl p-5 md:p-8"
-    >
-      <div
-        aria-hidden
-        className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-brand-yellow/15 blur-3xl"
-      />
-      <div
-        aria-hidden
-        className="absolute -bottom-32 -left-24 w-72 h-72 rounded-full bg-brand-magenta/15 blur-3xl"
-      />
-
-      <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-        <div className="flex items-center gap-4 md:gap-5 min-w-0">
-          {/* Brawlify profile icons are circular PNGs with transparent corners.
-              The outer ring stays circular too so no dark square ever shows
-              through; the inner Img uses object-cover to fill edge-to-edge. */}
-          <div className="shrink-0 w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-brand-yellow to-brand-magenta p-[2px] glow-yellow">
-            <Img
-              src={player.icon?.id ? cdn.playerIcon(player.icon.id) : undefined}
-              alt={`${player.name} avatar`}
-              wrapperClassName="w-full h-full rounded-full bg-bg-surface"
-              fit="cover"
-              fallback={
-                <span className="display text-brand-yellow text-2xl md:text-3xl">
-                  {player.name.slice(0, 2).toUpperCase()}
-                </span>
-              }
-            />
-          </div>
+    <div className="surface anim-in overflow-hidden p-4 md:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        {/* identité */}
+        <div className="flex items-center gap-4">
+          <Avatar
+            iconId={player.icon?.id}
+            name={player.name}
+            className="h-16 w-16 shrink-0 border border-white/10 text-xl"
+          />
           <div className="min-w-0">
-            <div className="flex items-baseline gap-3 min-w-0">
-              <h1 className="display text-3xl md:text-5xl truncate">
-                {player.name}
-              </h1>
-              <span className="display text-brand-yellow text-base md:text-xl shrink-0">
+            <h1
+              className="display truncate text-2xl md:text-[1.7rem]"
+              style={{ color: nameColorToCss(player.nameColor) }}
+            >
+              {player.name}
+            </h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-white/5 px-2 py-0.5 font-mono text-[12px] text-muted">
                 {displayTag(player.tag)}
               </span>
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-muted">
-              <span>Niveau {player.expLevel}</span>
-              {hasClub(player) && (
-                <>
-                  <span className="text-text-dim">·</span>
-                  <span>
-                    Club{" "}
-                    <span className="text-text-base font-semibold">
-                      {player.club.name}
-                    </span>
-                  </span>
-                </>
+              {club && (
+                <button
+                  onClick={() => navigate(`/player/${tag}?tab=club`)}
+                  className="inline-flex items-center gap-1 text-[12px] font-semibold text-cyan hover:underline"
+                >
+                  <IconClub size={13} /> {club.name}
+                </button>
               )}
               {player.isQualifiedFromChampionshipChallenge && (
-                <>
-                  <span className="text-text-dim">·</span>
-                  <span className="text-brand-yellow font-semibold">
-                    Championship qualifié
-                  </span>
-                </>
+                <span className="inline-flex items-center gap-1 rounded-md bg-gold/12 px-2 py-0.5 text-[10px] font-bold text-gold">
+                  <IconMedal size={12} /> CHAMPIONSHIP
+                </span>
               )}
             </div>
           </div>
         </div>
 
-        <div className="shrink-0 flex items-center gap-3 md:gap-4">
-          <Stat
-            label="Trophées"
-            value={fmtCompact(player.trophies)}
-            sub={`max ${fmtCompact(player.highestTrophies)}`}
-            icon={TROPHY}
-            tone="yellow"
-          />
-          <Stat
-            label="Victoires"
-            value={fmtCompact(
-              player["3vs3Victories"] +
-                player.soloVictories +
-                player.duoVictories,
-            )}
-            sub={`${fmtNum(player["3vs3Victories"])} 3v3`}
-            icon="⚔"
-            tone="magenta"
-          />
+        {/* stats + actions */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:flex">
+            <KeyStat
+              value={
+                <span className="inline-flex items-center gap-1">
+                  <IconTrophy size={15} />
+                  {fmtNum(player.trophies)}
+                </span>
+              }
+              label="Trophées"
+              gold
+            />
+            <KeyStat value={fmtNum(player.highestTrophies)} label="Record" />
+            <KeyStat value={fmtNum(player.expLevel)} label="Niveau" />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={togglePin}
+              aria-label={pinned ? "Ne plus épingler" : "Épingler"}
+              className={cn(
+                "flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-[13px] font-bold transition-colors",
+                pinned
+                  ? "border-gold/40 bg-gold/12 text-gold"
+                  : "border-line-strong bg-white/5 text-text hover:bg-white/10",
+              )}
+            >
+              <IconStar size={15} filled={pinned} />
+              <span className="hidden sm:inline">
+                {pinned ? "Épinglé" : "Épingler"}
+              </span>
+            </button>
+            <button
+              onClick={() => navigate(`/compare?a=${tag}`)}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-line-strong bg-white/5 px-3 py-2.5 text-[13px] font-bold text-text hover:bg-white/10"
+            >
+              <IconSwords size={15} /> <span className="hidden sm:inline">Comparer</span>
+            </button>
+            <button
+              onClick={onShare}
+              aria-label="Partager"
+              className="grid place-items-center rounded-xl border border-line-strong bg-white/5 px-3.5 text-text hover:bg-white/10"
+            >
+              <IconShare size={16} />
+            </button>
+          </div>
         </div>
       </div>
-    </motion.section>
+    </div>
   );
 }
 
-function Stat({
-  label,
+function KeyStat({
   value,
-  sub,
-  icon,
-  tone,
+  label,
+  gold = false,
 }: {
+  value: ReactNode;
   label: string;
-  value: string;
-  sub: string;
-  icon: string;
-  tone: "yellow" | "magenta";
+  gold?: boolean;
 }) {
   return (
     <div
-      className={`px-4 py-3 rounded-2xl bg-white/5 border border-white/10 min-w-[120px] ${tone === "yellow" ? "glow-yellow" : "glow-magenta"}`}
+      className={cn(
+        "rounded-xl border px-3 py-2 text-center sm:min-w-[92px]",
+        gold ? "border-gold/25 bg-gold/10" : "border-line bg-white/5",
+      )}
     >
-      <div className="text-xs text-text-muted uppercase tracking-wider flex items-center gap-1.5">
-        <span aria-hidden>{icon}</span>
+      <div className={cn("display text-lg", gold ? "text-gold" : "text-text")}>
+        {value}
+      </div>
+      <div className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted">
         {label}
       </div>
-      <div className="display text-2xl md:text-3xl mt-0.5">{value}</div>
-      <div className="text-[10px] text-text-dim mt-0.5">{sub}</div>
     </div>
   );
 }
 
 export function PlayerHeaderSkeleton() {
   return (
-    <div className="surface-elevated rounded-2xl p-5 md:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
-      <div className="flex items-center gap-5">
-        <Skeleton className="w-16 h-16 md:w-20 md:h-20" rounded="rounded-2xl" />
-        <div className="space-y-2">
-          <Skeleton className="h-7 md:h-10 w-44 md:w-56" />
-          <Skeleton className="h-3 w-32" />
+    <div className="surface p-4 md:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-16 w-16 rounded-2xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-4 w-28" />
+          </div>
         </div>
-      </div>
-      <div className="flex gap-3">
-        <Skeleton className="w-32 h-20" rounded="rounded-2xl" />
-        <Skeleton className="w-32 h-20" rounded="rounded-2xl" />
+        <div className="flex gap-2">
+          <Skeleton className="h-12 w-24" />
+          <Skeleton className="h-12 w-24" />
+          <Skeleton className="h-12 w-24" />
+        </div>
       </div>
     </div>
   );

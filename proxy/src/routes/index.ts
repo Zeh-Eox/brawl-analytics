@@ -5,6 +5,7 @@ import brawlers from "./brawlers.js";
 import rankings from "./rankings.js";
 import events from "./events.js";
 import analytics from "./analytics.js";
+import tracker from "./tracker.js";
 
 const router = Router();
 
@@ -24,6 +25,12 @@ router.get("/", (_req, res) => {
       rankings:
         "/rankings/:countryCode/players, /rankings/:countryCode/clubs, /rankings/:countryCode/brawlers/:brawlerId",
       events: "/events/rotation",
+      tracker: [
+        "POST /tracker/:tag",
+        "/tracker/:tag",
+        "/tracker/:tag/battles",
+        "/tracker/:tag/timeline",
+      ],
       analytics: [
         "/analytics/players/:tag/summary",
         "/analytics/players/:tag/brawlers",
@@ -41,6 +48,7 @@ router.use("/clubs", clubs);
 router.use("/brawlers", brawlers);
 router.use("/rankings", rankings);
 router.use("/events", events);
+router.use("/tracker", tracker);
 router.use("/analytics", analytics);
 
 export default router;

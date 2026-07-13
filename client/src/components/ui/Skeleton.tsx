@@ -1,21 +1,7 @@
 import { cn } from "../../utils/cn";
 
-export function Skeleton({
-  className,
-  rounded = "rounded-md",
-}: {
-  className?: string;
-  rounded?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "shimmer bg-white/5 border border-white/5",
-        rounded,
-        className,
-      )}
-    />
-  );
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("shimmer rounded-xl", className)} />;
 }
 
 export function SkeletonText({

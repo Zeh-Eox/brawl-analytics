@@ -88,3 +88,42 @@ export interface PlayerProfileAnalytics {
   battlelog: BattlelogAnalytics | null;
   computedAt: string;
 }
+
+export interface ClubSummary {
+  tag: string;
+  name: string;
+  type: string;
+  trophies: number;
+  requiredTrophies: number;
+  memberCount: number;
+  averageTrophies: number;
+  medianTrophies: number;
+  minTrophies: number;
+  maxTrophies: number;
+  trophySpread: number;
+  belowRequirement: number;
+  roleDistribution: Record<string, number>;
+  topContributors: Array<{
+    tag: string;
+    name: string;
+    trophies: number;
+    role: string;
+  }>;
+}
+
+export interface PlayerComparison {
+  players: [PlayerSummary, PlayerSummary];
+  diff: {
+    trophies: number;
+    highestTrophies: number;
+    expLevel: number;
+    totalVictories: number;
+    brawlersOwned: number;
+    maxedOut: number;
+    fullyRanked: number;
+    starPowers: number;
+    gadgets: number;
+    gears: number;
+  };
+  trophyLeader: "playerA" | "playerB" | "tie";
+}

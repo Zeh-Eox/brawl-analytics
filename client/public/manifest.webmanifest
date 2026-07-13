@@ -1,0 +1,20 @@
+{
+  "name": "NOVA — Stats Brawl Stars",
+  "short_name": "NOVA",
+  "description": "Colle ton tag, vois tes stats Brawl Stars : profil, brawlers, combats, historique, classements et événements.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#08090e",
+  "theme_color": "#08090e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
