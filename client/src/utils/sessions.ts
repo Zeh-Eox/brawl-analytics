@@ -1,4 +1,12 @@
-import type { BattleLogItem } from "../types/brawlstars";
+import type { BattleBrawler, BattlePlayer, BattleLogItem } from "../types/brawlstars";
+
+/**
+ * Résout le brawler d'un joueur de combat. Repli sur `brawlers[0]` (mode Duels,
+ * où l'API renvoie un tableau au lieu d'un objet unique). `null` si absent.
+ */
+export function battleBrawlerOf(p: BattlePlayer): BattleBrawler | null {
+  return p.brawler ?? p.brawlers?.[0] ?? null;
+}
 
 /** "YYYYMMDDTHHMMSS.000Z" → epoch ms. */
 export function battleTimeMs(bt: string): number {
@@ -30,7 +38,9 @@ export function myBrawler(
     ...(item.battle.players ?? []),
   ];
   const me = all.find((p) => p.tag === myTag);
-  return me ? { id: me.brawler.id, name: me.brawler.name } : null;
+  if (!me) return null;
+  const b = battleBrawlerOf(me);
+  return b ? { id: b.id, name: b.name } : null;
 }
 
 export interface Session {

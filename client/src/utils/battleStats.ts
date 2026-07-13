@@ -4,6 +4,7 @@ import type {
   BattleResult,
 } from "../types/brawlstars";
 import type { BattlelogAnalytics } from "../types/analytics";
+import { battleBrawlerOf } from "./sessions";
 
 const safeDiv = (n: number, d: number) => (d === 0 ? 0 : n / d);
 const round = (n: number, decimals = 4) => {
@@ -38,13 +39,14 @@ export function analyseBattlelog(
 ): BattlelogAnalytics {
   const slices = items.map((item) => {
     const own = findOwn(item, playerTag);
+    const ownB = own ? battleBrawlerOf(own) : null;
     return {
       result: (item.battle.result ?? null) as BattleResult | null,
       trophyChange: item.battle.trophyChange ?? 0,
       duration: item.battle.duration ?? null,
       starPlayerTag: item.battle.starPlayer?.tag ?? null,
       isStarPlayer: item.battle.starPlayer?.tag === playerTag,
-      ownBrawler: own ? { id: own.brawler.id, name: own.brawler.name } : null,
+      ownBrawler: ownB ? { id: ownB.id, name: ownB.name } : null,
     };
   });
 

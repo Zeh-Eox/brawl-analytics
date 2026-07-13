@@ -1,6 +1,7 @@
 import type {
   BattleLog,
   BattleLogItem,
+  BattlePlayer,
   BattleResult,
   Club,
   Player,
@@ -202,6 +203,17 @@ interface BattleSlice {
   isStarPlayer: boolean;
 }
 
+/**
+ * Résout le brawler d'un joueur de combat, avec repli sur `brawlers[0]`
+ * (mode Duels) — renvoie null si aucun n'est exposé.
+ */
+const brawlerOf = (
+  p: BattlePlayer,
+): { id: number; name: string } | null => {
+  const b = p.brawler ?? p.brawlers?.[0];
+  return b ? { id: b.id, name: b.name } : null;
+};
+
 const findOwnBrawler = (
   item: BattleLogItem,
   playerTag: string,
@@ -210,22 +222,18 @@ const findOwnBrawler = (
   if (teams) {
     for (const team of teams) {
       for (const p of team) {
-        if (p.tag === playerTag) return { id: p.brawler.id, name: p.brawler.name };
+        if (p.tag === playerTag) return brawlerOf(p);
       }
     }
   }
   const players = item.battle.players;
   if (players) {
     for (const p of players) {
-      if (p.tag === playerTag) return { id: p.brawler.id, name: p.brawler.name };
+      if (p.tag === playerTag) return brawlerOf(p);
     }
   }
-  if (item.battle.bigBrawler?.tag === playerTag) {
-    return {
-      id: item.battle.bigBrawler.brawler.id,
-      name: item.battle.bigBrawler.brawler.name,
-    };
-  }
+  const big = item.battle.bigBrawler;
+  if (big?.tag === playerTag) return brawlerOf(big);
   return null;
 };
 

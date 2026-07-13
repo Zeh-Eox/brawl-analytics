@@ -95,7 +95,12 @@ export interface BattleBrawler {
 export interface BattlePlayer {
   tag: string;
   name: string;
-  brawler: BattleBrawler;
+  /**
+   * Le brawler joué. ABSENT dans certains modes (ex. Duels, où l'API renvoie
+   * `brawlers` — un tableau — à la place). Toujours résoudre via un fallback.
+   */
+  brawler?: BattleBrawler;
+  brawlers?: BattleBrawler[];
 }
 
 export interface BattleEvent {
