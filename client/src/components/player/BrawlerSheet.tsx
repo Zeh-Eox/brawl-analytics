@@ -8,6 +8,7 @@ import { cdn, cdnChain } from "../../utils/cdn";
 import { fmtNum, fmtPercent } from "../../utils/format";
 import { prettyBrawlerName } from "../../utils/brawlerName";
 import { useAccumulatedBattles } from "../../hooks/useAccumulatedBattles";
+import { battleBrawlerOf } from "../../utils/sessions";
 import { accentHex, accentText, accentBgSoft, accentBorderSoft, type Accent } from "../ui/accent";
 import { BRAWLER_INFO, type BrawlerAbility } from "../../data/brawlerInfo";
 import { IconTrophy, IconStar, IconWrench, IconGear, type IconProps } from "../ui/icons";
@@ -35,9 +36,9 @@ const scale = (base: number, power: number) =>
 
 function ownBrawlerId(item: BattleLogItem, myTag: string): number | null {
   for (const t of item.battle.teams ?? [])
-    for (const p of t) if (p.tag === myTag) return p.brawler.id;
+    for (const p of t) if (p.tag === myTag) return battleBrawlerOf(p)?.id ?? null;
   for (const p of item.battle.players ?? [])
-    if (p.tag === myTag) return p.brawler.id;
+    if (p.tag === myTag) return battleBrawlerOf(p)?.id ?? null;
   return null;
 }
 function toIso(bt: string): string {

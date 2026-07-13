@@ -10,7 +10,12 @@ import { cn } from "../../utils/cn";
 import { cdn } from "../../utils/cdn";
 import { fmtDuration, fmtMode, fmtNum, relativeTime } from "../../utils/format";
 import { accentHex } from "../ui/accent";
-import { groupSessions, myBrawler, outcomeOf } from "../../utils/sessions";
+import {
+  battleBrawlerOf,
+  groupSessions,
+  myBrawler,
+  outcomeOf,
+} from "../../utils/sessions";
 import {
   IconController,
   IconClock,
@@ -494,10 +499,11 @@ function PlayerCell({
   star: boolean;
   onOpen: (tag: string) => void;
 }) {
+  const b = battleBrawlerOf(p);
   return (
     <button
       onClick={() => onOpen(p.tag)}
-      title={`${p.name} · ${p.brawler.name}`}
+      title={b ? `${p.name} · ${b.name}` : p.name}
       className="flex w-11 shrink-0 flex-col items-center gap-1.5 sm:w-14"
     >
       <div
@@ -506,17 +512,23 @@ function PlayerCell({
           mine ? "border-gold/70 ring-1 ring-gold/40" : "border-line",
         )}
       >
-        <Img
-          src={cdn.brawlerBorderless(p.brawler.id)}
-          alt={p.brawler.name}
-          fit="contain"
-          wrapperClassName="absolute inset-1.5 rounded-lg"
-          fallback={
-            <span className="display text-[10px] text-gold">
-              {p.brawler.name.slice(0, 2)}
-            </span>
-          }
-        />
+        {b ? (
+          <Img
+            src={cdn.brawlerBorderless(b.id)}
+            alt={b.name}
+            fit="contain"
+            wrapperClassName="absolute inset-1.5 rounded-lg"
+            fallback={
+              <span className="display grid h-full w-full place-items-center text-[10px] text-gold">
+                {b.name.slice(0, 2)}
+              </span>
+            }
+          />
+        ) : (
+          <span className="absolute inset-0 grid place-items-center text-[11px] text-dim">
+            ?
+          </span>
+        )}
         {star && (
           <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-gold text-app shadow">
             <IconStar size={10} filled />
@@ -531,12 +543,12 @@ function PlayerCell({
       >
         {p.name}
       </span>
-      {p.brawler.trophies >= 0 ? (
+      {b && b.trophies >= 0 ? (
         <span className="display inline-flex items-center gap-0.5 text-[10px] text-gold">
-          <IconTrophy size={10} />{fmtNum(p.brawler.trophies)}
+          <IconTrophy size={10} />{fmtNum(b.trophies)}
         </span>
-      ) : p.brawler.power >= 0 ? (
-        <span className="display text-[10px] text-text-2">P{p.brawler.power}</span>
+      ) : b && b.power >= 0 ? (
+        <span className="display text-[10px] text-text-2">P{b.power}</span>
       ) : (
         <span className="h-[13px]" />
       )}
