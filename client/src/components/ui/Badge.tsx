@@ -1,21 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../utils/cn";
-
-type Tone = "neutral" | "yellow" | "magenta" | "cyan" | "violet" | "success" | "danger" | "warning";
-
-const TONES: Record<Tone, string> = {
-  neutral: "bg-white/8 text-text-muted border-white/10",
-  yellow:
-    "bg-brand-yellow/12 text-brand-yellow-soft border-brand-yellow/40",
-  magenta:
-    "bg-brand-magenta/15 text-brand-magenta border-brand-magenta/40",
-  cyan: "bg-brand-cyan/12 text-brand-cyan border-brand-cyan/40",
-  violet:
-    "bg-brand-violet/15 text-brand-violet border-brand-violet/40",
-  success: "bg-success/15 text-success border-success/40",
-  danger: "bg-danger/15 text-danger border-danger/40",
-  warning: "bg-warning/15 text-warning border-warning/40",
-};
+import { accentText, accentBgSoft, accentBorderSoft, type Accent } from "./accent";
 
 export function Badge({
   children,
@@ -23,14 +8,16 @@ export function Badge({
   className,
 }: {
   children: ReactNode;
-  tone?: Tone;
+  tone?: Accent;
   className?: string;
 }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide leading-none",
-        TONES[tone],
+        "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-bold",
+        accentText[tone],
+        accentBgSoft[tone],
+        accentBorderSoft[tone],
         className,
       )}
     >

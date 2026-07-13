@@ -25,3 +25,22 @@ export const cdn = {
   map: (id: number) => `${BASE}/maps/regular/${id}.png`,
   gameMode: (id: number) => `${BASE}/game-modes/regular/${id}.png`,
 };
+
+/**
+ * Chaînes de repli : certains assets n'existent que dans une variante. On tente
+ * `borderless` puis `regular` (et inversement) avant de basculer sur un badge.
+ */
+export const cdnChain = {
+  starPower: (id: number) => [
+    `${BASE}/star-powers/borderless/${id}.png`,
+    `${BASE}/star-powers/regular/${id}.png`,
+  ],
+  gadget: (id: number) => [
+    `${BASE}/gadgets/borderless/${id}.png`,
+    `${BASE}/gadgets/regular/${id}.png`,
+  ],
+  gear: (id: number) => [
+    `${BASE}/gears/regular/${id}.png`,
+    `${BASE}/gears/borderless/${id}.png`,
+  ],
+};

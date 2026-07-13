@@ -1,469 +1,545 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAccumulatedBattles } from "../../hooks/useAccumulatedBattles";
-import type {
-  BattleLogItem,
-  BattlePlayer,
-  BattleResult,
-} from "../../types/brawlstars";
-import { Card } from "../ui/Card";
-import { Badge } from "../ui/Badge";
-import { ErrorState } from "../ui/ErrorState";
-import { Skeleton } from "../ui/Skeleton";
+import type { BattleLogItem, BattlePlayer } from "../../types/brawlstars";
 import { Img } from "../ui/Img";
-import { fmtBattleTime, fmtDuration, fmtMode, fmtPercent } from "../../utils/format";
-import { cdn } from "../../utils/cdn";
-import { BattleDetailModal } from "../player/BattleDetailModal";
+import { CdnIcon } from "../ui/CdnIcon";
+import { Skeleton } from "../ui/Skeleton";
+import { EmptyState } from "../ui/EmptyState";
 import { cn } from "../../utils/cn";
+import { cdn } from "../../utils/cdn";
+import { fmtDuration, fmtMode, fmtNum, relativeTime } from "../../utils/format";
+import { accentHex } from "../ui/accent";
+import { groupSessions, myBrawler, outcomeOf } from "../../utils/sessions";
+import {
+  IconController,
+  IconClock,
+  IconFilter,
+  IconLayers,
+  IconList,
+  IconStar,
+  IconTrophy,
+} from "../ui/icons";
 
-const PAGE_SIZE = 12;
+
+function resolveResult(item: BattleLogItem) {
+  const r = item.battle.result;
+  if (r === "victory") return { label: "Victoire", color: accentHex.success };
+  if (r === "defeat") return { label: "Défaite", color: accentHex.danger };
+  if (r === "draw") return { label: "Nul", color: accentHex.neutral };
+  if (typeof item.battle.rank === "number")
+    return {
+      label: `Rang ${item.battle.rank}`,
+      color: item.battle.rank <= 4 ? accentHex.success : accentHex.danger,
+    };
+  return { label: "—", color: accentHex.neutral };
+}
+
+/** "YYYYMMDDTHHMMSS.000Z" → ISO. */
+function toIso(bt: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(bt);
+  if (!m) return bt;
+  const [, y, mo, d, h, mi, s] = m;
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}Z`;
+}
+
+type ResultFilter = "all" | "victory" | "defeat";
+type ViewMode = "list" | "sessions";
 
 export function BattlesTab({ tag }: { tag: string }) {
-  const playerTag = `#${tag}`;
-  const data = useAccumulatedBattles(tag);
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState<BattleLogItem | null>(null);
-  const [resultFilter, setResultFilter] = useState<BattleResult | "all">("all");
+  const navigate = useNavigate();
+  const acc = useAccumulatedBattles(tag);
+  const myTag = `#${tag}`;
 
-  const filtered = useMemo(
-    () =>
-      resultFilter === "all"
-        ? data.items
-        : data.items.filter((b) => b.battle.result === resultFilter),
-    [data.items, resultFilter],
+  const [result, setResult] = useState<ResultFilter>("all");
+  const [mode, setMode] = useState<string>("all");
+  const [brawler, setBrawler] = useState<string>("all");
+  const [view, setView] = useState<ViewMode>("list");
+
+  // Modes & brawlers présents dans l'archive (pour peupler les sélecteurs).
+  const { modes, brawlers } = useMemo(() => {
+    const modeSet = new Map<string, string>();
+    const brawlerSet = new Map<string, string>();
+    for (const it of acc.items) {
+      const m = it.event.mode || it.battle.mode;
+      if (m) modeSet.set(m, m);
+      const mb = myBrawler(it, myTag);
+      if (mb) brawlerSet.set(String(mb.id), mb.name);
+    }
+    return {
+      modes: [...modeSet.keys()].sort((a, b) => a.localeCompare(b)),
+      brawlers: [...brawlerSet.entries()].sort((a, b) =>
+        a[1].localeCompare(b[1]),
+      ),
+    };
+  }, [acc.items, myTag]);
+
+  const filtered = useMemo(() => {
+    return acc.items.filter((it) => {
+      if (result !== "all" && outcomeOf(it) !== result) return false;
+      if (mode !== "all" && (it.event.mode || it.battle.mode) !== mode)
+        return false;
+      if (brawler !== "all") {
+        const mb = myBrawler(it, myTag);
+        if (!mb || String(mb.id) !== brawler) return false;
+      }
+      return true;
+    });
+  }, [acc.items, result, mode, brawler, myTag]);
+
+  const sessions = useMemo(
+    () => (view === "sessions" ? groupSessions(filtered) : []),
+    [view, filtered],
   );
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const slice = filtered.slice(
-    safePage * PAGE_SIZE,
-    safePage * PAGE_SIZE + PAGE_SIZE,
-  );
-
-  if (data.isLoading)
+  if (acc.isLoading) {
     return (
-      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="aspect-square w-full" rounded="rounded-2xl" />
+      <div className="grid gap-3 lg:grid-cols-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-40" />
         ))}
       </div>
     );
+  }
 
-  if (data.isError && data.items.length === 0)
+  if (acc.items.length === 0) {
     return (
-      <div className="mt-4">
-        <ErrorState error={data.error} onRetry={() => void data.refetch()} />
-      </div>
+      <EmptyState
+        icon={<IconController size={26} />}
+        title="Aucun combat récent"
+        message="Reviens après quelques parties — l'historique se construit à chaque visite, et la capture en arrière-plan l'enrichit même hors connexion."
+      />
     );
+  }
 
-  if (data.items.length === 0)
-    return (
-      <Card padding="lg" className="text-center text-text-muted mt-4">
-        Aucune bataille récente. Lance une partie en jeu et reviens !
-      </Card>
-    );
-
-  const wr = data.analytics?.winRate ?? 0;
-  const counted = data.analytics?.countedBattles ?? 0;
+  const hasFilters = result !== "all" || mode !== "all" || brawler !== "all";
 
   return (
-    <div className="mt-4 space-y-4">
-      {/* Header summary + filters */}
-      <Card padding="md" className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-3 mr-auto">
-          <div>
-            <div className="display text-3xl text-gradient-y leading-none">
-              {fmtPercent(wr, 1)}
-            </div>
-            <div className="text-text-dim text-xs">
-              win rate · {counted} matchs
-            </div>
-          </div>
-          <div className="hidden md:block w-px h-10 bg-white/10" />
-          <div className="hidden md:block">
-            <div className="text-text-dim text-[10px] uppercase tracking-wider">
-              Historique
-            </div>
-            <div className="text-sm">
-              <span className="font-bold text-text-base">
-                {data.items.length}
-              </span>
-              <span className="text-text-muted"> matchs</span>
-              {data.storedCount > 0 && (
-                <span className="text-text-dim text-xs ml-2">
-                  ({data.freshCount} récents + {data.storedCount} archivés)
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {(["all", "victory", "defeat", "draw"] as const).map((r) => (
+    <div className="space-y-3">
+      {/* Barre de filtres + bascule de vue */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-xl border border-line bg-surface-2 p-0.5">
+          {(["all", "victory", "defeat"] as ResultFilter[]).map((r) => (
             <button
               key={r}
-              onClick={() => {
-                setResultFilter(r);
-                setPage(0);
-              }}
+              onClick={() => setResult(r)}
               className={cn(
-                "px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider transition-colors",
-                resultFilter === r
+                "rounded-lg px-3 py-1.5 text-[12px] font-bold transition-colors",
+                result === r
                   ? r === "victory"
-                    ? "bg-success text-bg-base"
+                    ? "bg-success/15 text-success"
                     : r === "defeat"
-                      ? "bg-danger text-bg-base"
-                      : r === "draw"
-                        ? "bg-warning text-bg-base"
-                        : "bg-brand-yellow text-bg-base"
-                  : "bg-white/5 text-text-muted hover:text-text-base",
+                      ? "bg-danger/15 text-danger"
+                      : "bg-gold/15 text-gold"
+                  : "text-dim hover:text-text-2",
               )}
             >
-              {r === "all"
-                ? "Tous"
-                : r === "victory"
-                  ? "V"
-                  : r === "defeat"
-                    ? "D"
-                    : "N"}
+              {r === "all" ? "Tous" : r === "victory" ? "Victoires" : "Défaites"}
             </button>
           ))}
-          {data.items.length > 25 && (
-            <button
-              onClick={() => {
-                if (
-                  confirm(
-                    "Effacer l'historique local des batailles pour ce joueur ?",
-                  )
-                ) {
-                  data.clearHistory();
-                  setPage(0);
-                }
-              }}
-              className="ml-2 text-xs text-text-dim hover:text-danger"
-              title="Vider l'historique local"
-            >
-              vider
-            </button>
-          )}
         </div>
-      </Card>
+
+        <Select
+          value={mode}
+          onChange={setMode}
+          label="Mode"
+          options={[
+            { value: "all", label: "Tous les modes" },
+            ...modes.map((m) => ({ value: m, label: fmtMode(m) })),
+          ]}
+        />
+        {brawlers.length > 1 && (
+          <Select
+            value={brawler}
+            onChange={setBrawler}
+            label="Brawler"
+            options={[
+              { value: "all", label: "Tous les brawlers" },
+              ...brawlers.map(([id, name]) => ({ value: id, label: name })),
+            ]}
+          />
+        )}
+
+        <div className="ml-auto flex rounded-xl border border-line bg-surface-2 p-0.5">
+          <ViewButton
+            active={view === "list"}
+            onClick={() => setView("list")}
+            icon={<IconList size={15} />}
+            label="Liste"
+          />
+          <ViewButton
+            active={view === "sessions"}
+            onClick={() => setView("sessions")}
+            icon={<IconLayers size={15} />}
+            label="Sessions"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 text-[12px]">
+        <span className="font-bold text-text">
+          {filtered.length} combat{filtered.length > 1 ? "s" : ""}
+        </span>
+        <span className="text-dim">
+          {hasFilters
+            ? `· filtrés sur ${acc.items.length}`
+            : `· ${acc.freshCount} récents + ${acc.storedCount} archivés (25 max/API)`}
+        </span>
+      </div>
 
       {filtered.length === 0 ? (
-        <Card padding="lg" className="text-center text-text-muted">
-          Aucune bataille ne correspond à ce filtre.
-        </Card>
-      ) : (
-        <>
-          {/* Square card grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {slice.map((item, i) => (
-              <BattleCard
-                key={`${item.battleTime}-${i}`}
-                item={item}
-                playerTag={playerTag}
-                onClick={() => setSelected(item)}
-              />
-            ))}
-          </div>
-
-          {/* Pagination */}
-          {pageCount > 1 && (
-            <Pagination
-              page={safePage}
-              pageCount={pageCount}
-              onChange={setPage}
-            />
-          )}
-        </>
-      )}
-
-      {selected && (
-        <BattleDetailModal
-          item={selected}
-          playerTag={playerTag}
-          onClose={() => setSelected(null)}
+        <EmptyState
+          icon={<IconFilter size={24} />}
+          title="Aucun combat pour ce filtre"
+          message="Élargis les critères pour voir plus de parties."
+          className="py-10"
         />
+      ) : view === "sessions" ? (
+        <div className="space-y-5">
+          {sessions.map((s, si) => (
+            <div key={`${s.end}-${si}`} className="space-y-3">
+              <SessionHeader session={s} />
+              <div className="grid gap-3 lg:grid-cols-2">
+                {s.items.map((item, i) => (
+                  <BattleCard
+                    key={`${item.battleTime}-${i}`}
+                    item={item}
+                    myTag={myTag}
+                    onOpenPlayer={(t) =>
+                      navigate(`/player/${t.replace(/^#/, "")}`)
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {filtered.map((item, i) => (
+            <BattleCard
+              key={`${item.battleTime}-${i}`}
+              item={item}
+              myTag={myTag}
+              onOpenPlayer={(t) => navigate(`/player/${t.replace(/^#/, "")}`)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-// ------------------------------------------------------------------
-// Square card
-// ------------------------------------------------------------------
-
-function findOwn(item: BattleLogItem, tag: string): BattlePlayer | null {
-  for (const t of item.battle.teams ?? []) {
-    const f = t.find((p) => p.tag === tag);
-    if (f) return f;
-  }
-  return item.battle.players?.find((p) => p.tag === tag) ?? null;
+function ViewButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-bold transition-colors",
+        active ? "bg-gold/15 text-gold" : "text-dim hover:text-text-2",
+      )}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
 }
 
-function tone(r?: BattleResult, rank?: number) {
-  if (r === "victory") return "success";
-  if (r === "defeat") return "danger";
-  if (r === "draw") return "warning";
-  if (rank !== undefined) {
-    if (rank <= 4) return "success";
-    if (rank <= 6) return "warning";
-    return "danger";
-  }
-  return "neutral";
+function Select({
+  value,
+  onChange,
+  label,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="relative inline-flex items-center">
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="cursor-pointer appearance-none rounded-xl border border-line bg-surface-2 py-1.5 pl-3 pr-8 text-[12px] font-semibold text-text outline-none hover:border-line-strong"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value} className="bg-surface text-text">
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-2.5 text-dim">▾</span>
+    </label>
+  );
 }
 
-function label(r?: BattleResult, rank?: number) {
-  if (r === "victory") return "VICTOIRE";
-  if (r === "defeat") return "DÉFAITE";
-  if (r === "draw") return "NUL";
-  if (rank !== undefined) return `RANG ${rank}`;
-  return "—";
+const sessionOutcomeColor = (delta: number) =>
+  delta > 0 ? accentHex.success : delta < 0 ? accentHex.danger : accentHex.neutral;
+
+function SessionHeader({
+  session,
+}: {
+  session: ReturnType<typeof groupSessions>[number];
+}) {
+  const day = new Date(toIso(session.end)).toLocaleDateString("fr-FR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+  });
+  const total = session.wins + session.losses + session.draws;
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2/60 px-3.5 py-2.5">
+      <div
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
+        style={{ background: `${sessionOutcomeColor(session.trophyDelta)}22` }}
+      >
+        <IconLayers size={16} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-bold capitalize text-text">{day}</div>
+        <div className="text-[11px] text-dim">
+          {total} combat{total > 1 ? "s" : ""} ·{" "}
+          {relativeTime(toIso(session.start))}
+          {session.playedSec > 0 && ` · ${fmtDuration(session.playedSec)}`}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 text-[12px] font-bold">
+        <span className="text-success">{session.wins}V</span>
+        <span className="text-danger">{session.losses}D</span>
+        {session.trophyDelta !== 0 && (
+          <span
+            className="display"
+            style={{ color: sessionOutcomeColor(session.trophyDelta) }}
+          >
+            {session.trophyDelta > 0 ? "+" : ""}
+            {fmtNum(session.trophyDelta)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function BattleCard({
   item,
-  playerTag,
-  onClick,
+  myTag,
+  onOpenPlayer,
 }: {
   item: BattleLogItem;
-  playerTag: string;
-  onClick: () => void;
+  myTag: string;
+  onOpenPlayer: (tag: string) => void;
 }) {
-  const own = findOwn(item, playerTag);
-  const t = tone(item.battle.result, item.battle.rank);
-  const lbl = label(item.battle.result, item.battle.rank);
-  const change = item.battle.trophyChange;
-  const isStar = item.battle.starPlayer?.tag === playerTag;
+  const res = resolveResult(item);
+  const delta = item.battle.trophyChange;
+  const mode = item.event.mode || item.battle.mode;
+  const isFriendly = item.battle.type === "friendly";
+  const star = item.battle.starPlayer?.tag ?? null;
+  const mapImg = item.event.id > 0 ? cdn.map(item.event.id) : null;
+  // Icône de mode seule (l'image de la map est affichée à côté).
+  const modeSrcs =
+    typeof item.event.modeId === "number"
+      ? [cdn.gameMode(48000000 + item.event.modeId)]
+      : [];
 
-  const accentBg = {
-    success: "from-success/15 to-success/0",
-    danger: "from-danger/15 to-danger/0",
-    warning: "from-warning/15 to-warning/0",
-    neutral: "from-white/5 to-transparent",
-  }[t];
-
-  const ribbonBg = {
-    success: "bg-success",
-    danger: "bg-danger",
-    warning: "bg-warning",
-    neutral: "bg-white/15",
-  }[t];
+  const teams = item.battle.teams;
+  const isVs = !!teams && teams.length === 2;
+  let mine: BattlePlayer[] = [];
+  let other: BattlePlayer[] = [];
+  let solo: BattlePlayer[] = [];
+  if (isVs) {
+    mine = teams!.find((t) => t.some((p) => p.tag === myTag)) ?? teams![0]!;
+    other = teams!.find((t) => t !== mine) ?? teams![1]!;
+  } else if (teams && teams.length > 2) {
+    solo = teams.flat();
+  } else {
+    solo = item.battle.players ?? [];
+  }
 
   return (
-    <button
-      onClick={onClick}
-      className="group relative text-left surface rounded-2xl overflow-hidden focus:outline-none focus:ring-2 focus:ring-brand-yellow/60 transition-transform hover:-translate-y-0.5"
+    <div
+      className="overflow-hidden rounded-2xl border border-line bg-surface"
+      style={{ borderLeft: `3px solid ${res.color}` }}
     >
-      {/* Side ribbon */}
-      <span
-        aria-hidden
-        className={cn(
-          "absolute top-0 left-0 bottom-0 w-1.5",
-          ribbonBg,
-        )}
-      />
-
-      {/* Subtle accent backdrop */}
-      <div
-        aria-hidden
-        className={cn(
-          "absolute inset-0 bg-gradient-to-br pointer-events-none",
-          accentBg,
-        )}
-      />
-
-      <div className="relative p-3 md:p-4 flex flex-col gap-3 h-full">
-        {/* Row 1: result + star */}
-        <div className="flex items-center justify-between gap-2">
-          <Badge tone={t as never}>{lbl}</Badge>
-          {isStar && (
-            <Badge tone="yellow" className="!px-1.5 !py-0.5 text-[9px]">
-              ★ STAR
-            </Badge>
-          )}
-        </div>
-
-        {/* Row 2: brawler portrait + mode/map */}
-        <div className="flex items-center gap-3 min-w-0">
-          {own ? (
-            <Img
-              src={cdn.brawlerBorderless(own.brawler.id)}
-              alt={own.brawler.name}
-              wrapperClassName="shrink-0 w-14 h-14 rounded-xl bg-bg-base/40 ring-1 ring-white/10"
-              fallback={
-                <span className="display text-brand-yellow text-sm">
-                  {own.brawler.name.slice(0, 2)}
-                </span>
-              }
+      {/* En-tête : icône de mode + vignette de map côte à côte */}
+      <div className="flex items-center gap-2.5 p-3">
+        <CdnIcon
+          srcs={modeSrcs}
+          alt={mode}
+          wrapperClassName="h-11 w-11 shrink-0 rounded-lg border border-line bg-surface-2"
+          fallback={<span className="text-text-2"><IconController size={18} /></span>}
+        />
+        {mapImg && (
+          <div className="h-11 w-16 shrink-0 overflow-hidden rounded-lg border border-line bg-surface-2">
+            <CdnIcon
+              srcs={[mapImg]}
+              alt={item.event.map}
+              fit="cover"
+              wrapperClassName="h-full w-full"
+              fallback={<span className="text-[9px] text-dim">map</span>}
             />
-          ) : (
-            <div className="shrink-0 w-14 h-14 rounded-xl bg-bg-base/40 ring-1 ring-white/10 grid place-items-center text-text-dim text-xs">
-              ?
-            </div>
-          )}
+          </div>
+        )}
           <div className="min-w-0 flex-1">
-            <div className="display text-base truncate">
-              {own?.brawler.name ?? "—"}
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-bold text-text">
+                {fmtMode(mode)}
+              </span>
+              {isFriendly && (
+                <span className="shrink-0 rounded bg-violet/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-violet">
+                  Amical
+                </span>
+              )}
+              {typeof item.battle.duration === "number" && (
+                <span className="shrink-0 rounded bg-white/8 px-1.5 py-0.5 font-mono text-[10px] text-text-2">
+                  <IconClock size={11} className="inline align-[-1px]" /> {fmtDuration(item.battle.duration)}
+                </span>
+              )}
             </div>
-            <div className="text-text-muted text-xs truncate">
-              {fmtMode(item.event.mode || item.battle.mode)}
+            <div className="truncate text-[11px] text-dim">
+              {item.event.map || (isFriendly ? "Match amical" : "Événement spécial")}{" "}
+              · {relativeTime(toIso(item.battleTime))}
             </div>
-            <div className="text-text-dim text-[10px] truncate">
-              {item.event.map || "Map inconnue"}
+          </div>
+          <div className="text-right">
+            <div
+              className="text-[12px] font-extrabold uppercase"
+              style={{ color: res.color }}
+            >
+              {res.label}
             </div>
+            {typeof delta === "number" && delta !== 0 && (
+              <div
+                className="display text-[13px]"
+                style={{ color: delta > 0 ? accentHex.success : accentHex.danger }}
+              >
+                {delta > 0 ? "+" : ""}
+                {delta}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Row 3: bottom stats grid */}
-        <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-white/5">
-          <Cell
-            label="Trophées"
-            value={
-              change !== undefined && change !== 0
-                ? change > 0
-                  ? `+${change}`
-                  : `${change}`
-                : "—"
-            }
-            valueClass={
-              change && change > 0
-                ? "text-success"
-                : change && change < 0
-                  ? "text-danger"
-                  : ""
-            }
-          />
-          <Cell
-            label="Durée"
-            value={fmtDuration(item.battle.duration ?? null)}
-          />
-          <Cell label="Quand" value={fmtBattleTime(item.battleTime)} small />
-        </div>
-
-        {/* Hover hint */}
-        <div className="absolute bottom-2 right-3 text-[10px] uppercase tracking-wider text-text-dim opacity-0 group-hover:opacity-100 transition-opacity">
-          Détails →
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function Cell({
-  label,
-  value,
-  valueClass,
-  small,
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-  small?: boolean;
-}) {
-  return (
-    <div className="bg-white/3 rounded-md py-1.5 px-2 text-center">
-      <div className="text-[9px] uppercase tracking-wider text-text-dim">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "display",
-          small ? "text-[11px] mt-0.5 truncate" : "text-sm mt-0.5",
-          valueClass,
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------
-// Pagination
-// ------------------------------------------------------------------
-
-function Pagination({
-  page,
-  pageCount,
-  onChange,
-}: {
-  page: number;
-  pageCount: number;
-  onChange: (page: number) => void;
-}) {
-  // Compute a compact set of visible page numbers around the current page.
-  const visible = pageNumbers(page, pageCount);
-
-  return (
-    <div className="flex items-center justify-center gap-1.5 pt-2">
-      <NavBtn
-        disabled={page === 0}
-        onClick={() => onChange(Math.max(0, page - 1))}
-      >
-        ←
-      </NavBtn>
-      {visible.map((p, i) =>
-        p === -1 ? (
-          <span
-            key={`gap-${i}`}
-            className="px-1.5 text-text-dim text-sm select-none"
-          >
-            …
-          </span>
+      {/* Corps : VS (3v3) ou grille (showdown) */}
+      <div className="p-3 pt-2">
+        {isVs ? (
+          <div className="flex items-start justify-center gap-2 overflow-x-auto no-scrollbar py-1 sm:gap-4">
+            <Team players={mine} myTag={myTag} star={star} onOpen={onOpenPlayer} />
+            <div className="display px-1 pt-4 text-sm text-dim">VS</div>
+            <Team players={other} myTag={myTag} star={star} onOpen={onOpenPlayer} />
+          </div>
         ) : (
-          <button
-            key={p}
-            onClick={() => onChange(p)}
-            className={cn(
-              "min-w-9 h-9 px-3 rounded-lg text-sm font-bold transition-colors",
-              p === page
-                ? "bg-brand-yellow text-bg-base"
-                : "bg-white/5 text-text-muted hover:text-text-base",
-            )}
-          >
-            {p + 1}
-          </button>
-        ),
-      )}
-      <NavBtn
-        disabled={page >= pageCount - 1}
-        onClick={() => onChange(Math.min(pageCount - 1, page + 1))}
-      >
-        →
-      </NavBtn>
+          <div className="grid grid-cols-5 gap-x-3 gap-y-4 py-1">
+            {solo.map((p, j) => (
+              <PlayerCell
+                key={`${p.tag}-${j}`}
+                p={p}
+                mine={p.tag === myTag}
+                star={p.tag === star}
+                onOpen={onOpenPlayer}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function NavBtn({
-  children,
-  disabled,
-  onClick,
+function Team({
+  players,
+  myTag,
+  star,
+  onOpen,
 }: {
-  children: React.ReactNode;
-  disabled?: boolean;
-  onClick: () => void;
+  players: BattlePlayer[];
+  myTag: string;
+  star: string | null;
+  onOpen: (tag: string) => void;
+}) {
+  return (
+    <div className="flex gap-1.5 sm:gap-2.5">
+      {players.map((p, j) => (
+        <PlayerCell
+          key={`${p.tag}-${j}`}
+          p={p}
+          mine={p.tag === myTag}
+          star={p.tag === star}
+          onOpen={onOpen}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PlayerCell({
+  p,
+  mine,
+  star,
+  onOpen,
+}: {
+  p: BattlePlayer;
+  mine: boolean;
+  star: boolean;
+  onOpen: (tag: string) => void;
 }) {
   return (
     <button
-      onClick={onClick}
-      disabled={disabled}
-      className="min-w-9 h-9 px-3 rounded-lg bg-white/5 text-text-base font-bold hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed"
+      onClick={() => onOpen(p.tag)}
+      title={`${p.name} · ${p.brawler.name}`}
+      className="flex w-11 shrink-0 flex-col items-center gap-1.5 sm:w-14"
     >
-      {children}
+      <div
+        className={cn(
+          "relative h-11 w-11 rounded-xl border bg-surface-2 sm:h-14 sm:w-14 sm:rounded-2xl",
+          mine ? "border-gold/70 ring-1 ring-gold/40" : "border-line",
+        )}
+      >
+        <Img
+          src={cdn.brawlerBorderless(p.brawler.id)}
+          alt={p.brawler.name}
+          fit="contain"
+          wrapperClassName="absolute inset-1.5 rounded-lg"
+          fallback={
+            <span className="display text-[10px] text-gold">
+              {p.brawler.name.slice(0, 2)}
+            </span>
+          }
+        />
+        {star && (
+          <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-gold text-app shadow">
+            <IconStar size={10} filled />
+          </span>
+        )}
+      </div>
+      <span
+        className={cn(
+          "w-full truncate text-center text-[10px] font-semibold",
+          mine ? "text-gold" : "text-text-2",
+        )}
+      >
+        {p.name}
+      </span>
+      {p.brawler.trophies >= 0 ? (
+        <span className="display inline-flex items-center gap-0.5 text-[10px] text-gold">
+          <IconTrophy size={10} />{fmtNum(p.brawler.trophies)}
+        </span>
+      ) : p.brawler.power >= 0 ? (
+        <span className="display text-[10px] text-text-2">P{p.brawler.power}</span>
+      ) : (
+        <span className="h-[13px]" />
+      )}
     </button>
   );
-}
-
-/** Build pagination model: first, current ± 1, last, with -1 for ellipsis. */
-function pageNumbers(page: number, count: number): number[] {
-  if (count <= 7) return Array.from({ length: count }, (_, i) => i);
-  const set = new Set<number>([0, count - 1, page - 1, page, page + 1]);
-  const arr = [...set].filter((n) => n >= 0 && n < count).sort((a, b) => a - b);
-  const out: number[] = [];
-  for (let i = 0; i < arr.length; i += 1) {
-    if (i > 0 && arr[i]! - arr[i - 1]! > 1) out.push(-1);
-    out.push(arr[i]!);
-  }
-  return out;
 }

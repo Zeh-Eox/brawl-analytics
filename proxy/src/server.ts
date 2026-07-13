@@ -10,6 +10,7 @@ import {
   notFoundHandler,
 } from "./middleware/errorHandler.js";
 import router from "./routes/index.js";
+import { initTracker, startPoller, stopPoller } from "./services/tracker.js";
 
 const app = express();
 
@@ -44,11 +45,14 @@ const server = app.listen(config.PORT, () => {
     { port: config.PORT, env: config.NODE_ENV },
     "brawl-analytics proxy listening",
   );
+  // Hydrate the background-capture store, then start the poller.
+  void initTracker().then(() => startPoller());
 });
 
 // Graceful shutdown so in-flight requests get a chance to drain.
 const shutdown = (signal: string) => {
   logger.info({ signal }, "shutting down");
+  stopPoller();
   server.close((err) => {
     if (err) {
       logger.error({ err }, "error during shutdown");

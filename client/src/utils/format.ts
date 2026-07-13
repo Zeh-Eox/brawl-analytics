@@ -15,6 +15,26 @@ export const fmtDuration = (seconds: number | null): string => {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 };
 
+/** Durée en heures uniquement : "957 h", "3 h". */
+export const fmtHours = (seconds: number | null): string =>
+  !seconds || seconds <= 0 || Number.isNaN(seconds)
+    ? "—"
+    : `${nf.format(Math.round(seconds / 3600))} h`;
+
+/** Durée longue (temps de jeu) : "3 j 4 h", "12 h 30", "45 min". */
+export const fmtPlaytime = (seconds: number | null): string => {
+  if (!seconds || seconds <= 0 || Number.isNaN(seconds)) return "—";
+  const totalMin = Math.floor(seconds / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    return `${d} j ${h % 24} h`;
+  }
+  if (h > 0) return `${h} h ${m.toString().padStart(2, "0")}`;
+  return `${m} min`;
+};
+
 const MODE_LABELS: Record<string, string> = {
   brawlBall: "Brawl Ball",
   gemGrab: "Gem Grab",

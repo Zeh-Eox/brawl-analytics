@@ -23,3 +23,12 @@ createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+// PWA : enregistre le service worker en production (le dev garde le HMR intact).
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* enregistrement best-effort */
+    });
+  });
+}

@@ -77,6 +77,8 @@ export interface BattleEvent {
   id: number;
   mode: string;
   map: string;
+  /** Petit entier officiel ; l'icône Brawlify = 48000000 + modeId. */
+  modeId?: number;
 }
 export interface Battle {
   mode: string;
@@ -103,3 +105,57 @@ export interface ScheduledEvent {
   endTime: string;
   event: BattleEvent;
 }
+
+// ---- Clubs ----
+export type ClubMemberRole =
+  | "notMember"
+  | "member"
+  | "president"
+  | "senior"
+  | "vicePresident"
+  | "unknown";
+
+export type ClubType = "open" | "inviteOnly" | "closed" | "unknown";
+
+export interface ClubMember {
+  tag: string;
+  name: string;
+  nameColor: string;
+  role: ClubMemberRole;
+  trophies: number;
+  icon: PlayerIcon;
+}
+
+export interface Club {
+  tag: string;
+  name: string;
+  description: string;
+  type: ClubType;
+  badgeId: number;
+  requiredTrophies: number;
+  trophies: number;
+  members: ClubMember[];
+}
+export type ClubMemberList = PaginatedList<ClubMember>;
+
+// ---- Rankings ----
+export interface PlayerRanking {
+  tag: string;
+  name: string;
+  nameColor: string;
+  icon: PlayerIcon;
+  trophies: number;
+  rank: number;
+  club?: { name: string };
+}
+export type PlayerRankingList = PaginatedList<PlayerRanking>;
+
+export interface ClubRanking {
+  tag: string;
+  name: string;
+  badgeId: number;
+  trophies: number;
+  rank: number;
+  memberCount: number;
+}
+export type ClubRankingList = PaginatedList<ClubRanking>;
